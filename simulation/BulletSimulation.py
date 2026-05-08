@@ -214,19 +214,24 @@ def run_simulation(callback=None):
     # --- Physics World settings ---
     world = find_world()
     if world:
-        gravity_mag   = world.Gravity
-        gravity_dir   = world.GravityDirection
-        time_step     = world.TimeStep
-        steps         = world.Steps
-        solver_iters  = world.SolverIterations
-        sub_steps     = max(1, world.SubSteps)
+        # _ensure_properties patches any property missing from objects created
+        # by an older version of the workbench (live session, no save/load needed)
+        if hasattr(world.Proxy, "_ensure_properties"):
+            world.Proxy._ensure_properties(world)
+
+        gravity_mag  = world.Gravity
+        gravity_dir  = world.GravityDirection
+        time_step    = world.TimeStep
+        steps        = world.Steps
+        solver_iters = world.SolverIterations
+        sub_steps    = max(1, getattr(world, "SubSteps", 4))
     else:
-        gravity_mag   = 9.81
-        gravity_dir   = FreeCAD.Vector(0, 0, -1)
-        time_step     = 1.0 / 60.0
-        steps         = 500
-        solver_iters  = 10
-        sub_steps     = 4
+        gravity_mag  = 9.81
+        gravity_dir  = FreeCAD.Vector(0, 0, -1)
+        time_step    = 1.0 / 60.0
+        steps        = 500
+        solver_iters = 10
+        sub_steps    = 4
 
     # Normalise direction
     d = gravity_dir

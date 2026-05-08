@@ -31,8 +31,20 @@ class BulletWorldFeature:
 
         obj.Proxy = self
 
+    def _ensure_properties(self, obj):
+        """Add any properties that are missing (handles objects created by older code)."""
+        if not hasattr(obj, "SubSteps"):
+            obj.addProperty("App::PropertyInteger", "SubSteps", "Simulation",
+                            "Physics sub-steps per recorded frame. "
+                            "Higher values prevent objects passing through each other "
+                            "at the cost of simulation time (default 4)")
+            obj.SubSteps = 4
+
     def execute(self, obj):
         pass
+
+    def onDocumentRestored(self, obj):
+        self._ensure_properties(obj)
 
     def __getstate__(self):
         return None
