@@ -94,6 +94,13 @@ def run_simulation(callback=None):
     gy = d.y / length * gravity_mag
     gz = d.z / length * gravity_mag
 
+    FreeCAD.Console.PrintMessage(
+        f"BulletPhysics: starting simulation — "
+        f"steps={steps}, Δt={time_step*1000:.3f} ms, "
+        f"gravity=({gx:.3f}, {gy:.3f}, {gz:.3f}) m/s², "
+        f"solverIterations={solver_iters}\n"
+    )
+
     client = p.connect(p.DIRECT)
     p.setGravity(gx, gy, gz, physicsClientId=client)
     p.setTimeStep(time_step, physicsClientId=client)
@@ -108,6 +115,15 @@ def run_simulation(callback=None):
             original = rb.OriginalObject
             link     = rb.BodyLink
 
+            # Always use the original object's placement as the ground truth for
+            # the initial state.  The link may sit at the end of a previous
+            # simulation run, so reading link.Placement would give wrong initial
+            # orientation and a broken local_offset.
+            orig_pl = original.Placement
+
+            # Reset the link to the original position before building the world
+            link.Placement = orig_pl.copy()
+
             shape = original.Shape
             bb = shape.BoundBox
 
@@ -116,8 +132,7 @@ def run_simulation(callback=None):
                     bb.YLength * MM_TO_M / 2.0,
                     bb.ZLength * MM_TO_M / 2.0]
 
-            # Initial world-space centre: use original bbox centre
-            # (link starts at the same placement as original was at creation time)
+            # World-space bbox centre (original never moves, so this is stable)
             world_center = FreeCAD.Vector(
                 bb.Center.x, bb.Center.y, bb.Center.z)
             center_m = [world_center.x * MM_TO_M,
@@ -127,9 +142,8 @@ def run_simulation(callback=None):
             col = p.createCollisionShape(
                 p.GEOM_BOX, halfExtents=half, physicsClientId=client)
 
-            link_pl = link.Placement
-            rot_q   = link_pl.Rotation.Q      # (x, y, z, w)
-            mass    = rb.Mass if rb.BodyType == "Active" else 0.0
+            rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
+            mass  = rb.Mass if rb.BodyType == "Active" else 0.0
 
             body_id = p.createMultiBody(
                 baseMass=mass,
@@ -145,9 +159,9 @@ def run_simulation(callback=None):
                 physicsClientId=client,
             )
 
-            # Local offset: from link-placement origin to bbox centre, in link's local frame
-            local_offset = link_pl.Rotation.inverted().multVec(
-                world_center - link_pl.Base)
+            # Local offset: placement origin → bbox centre in object's local frame
+            local_offset = orig_pl.Rotation.inverted().multVec(
+                world_center - orig_pl.Base)
 
             body_map[body_id] = (rb, link, local_offset)
 
