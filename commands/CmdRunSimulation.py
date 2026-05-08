@@ -105,6 +105,15 @@ class SimulationPanel:
         opts.addWidget(self.loop_chk)
         play_layout.addLayout(opts)
 
+        # Reset button — always available, restores Links to original placements
+        self.reset_btn = QtWidgets.QPushButton("Reset to Initial Position")
+        self.reset_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_DialogResetButton))
+        self.reset_btn.setToolTip(
+            "Stop playback and restore all simulation objects to their\n"
+            "positions before the simulation was run.")
+        play_layout.addWidget(self.reset_btn)
+
         root.addWidget(play_group)
         root.addStretch()
 
@@ -114,6 +123,7 @@ class SimulationPanel:
 
         # ── Wiring ────────────────────────────────────────────────────────────
         self.sim_btn.clicked.connect(self._run_simulation)
+        self.reset_btn.clicked.connect(self._reset)
         self.slider.valueChanged.connect(self._on_slider)
         self.btn_start.clicked.connect(self._go_start)
         self.btn_back.clicked.connect(self._step_back)
@@ -254,6 +264,23 @@ class SimulationPanel:
                 self._stop()
                 return
         self.slider.setValue(next_idx)
+
+    def _reset(self):
+        """Restore every Link to the placement it had before simulation."""
+        self._stop()
+        from simulation.BulletSimulation import collect_rigid_bodies
+        for rb in collect_rigid_bodies():
+            try:
+                rb.BodyLink.Placement = rb.OriginalObject.Placement.copy()
+            except Exception:
+                pass
+        FreeCADGui.updateGui()
+        # Sync slider back to frame 0 without re-applying a recorded frame
+        if self.frames:
+            self.slider.blockSignals(True)
+            self.slider.setValue(0)
+            self.slider.blockSignals(False)
+            self._update_frame_label(0)
 
     def reject(self):
         self._stop()
