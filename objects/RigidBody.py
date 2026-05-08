@@ -58,6 +58,15 @@ class RigidBodyViewProvider:
             return [obj.BodyLink]
         return []
 
+    def onChanged(self, vobj, prop):
+        if prop == "Visibility":
+            obj = self.Object
+            if hasattr(obj, "BodyLink") and obj.BodyLink is not None:
+                try:
+                    obj.BodyLink.ViewObject.Visibility = vobj.Visibility
+                except Exception:
+                    pass
+
     def onDelete(self, vobj, subelements):
         return True
 

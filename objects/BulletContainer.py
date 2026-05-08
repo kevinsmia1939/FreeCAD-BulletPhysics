@@ -40,6 +40,25 @@ class BulletContainerViewProvider:
             children.extend(rb for rb in obj.RigidBodies if rb is not None)
         return children
 
+    def onChanged(self, vobj, prop):
+        if prop == "Visibility":
+            obj = self.Object
+            visible = vobj.Visibility
+            # Propagate to World
+            if hasattr(obj, "World") and obj.World is not None:
+                try:
+                    obj.World.ViewObject.Visibility = visible
+                except Exception:
+                    pass
+            # Propagate to each RigidBody (which in turn propagates to its Link)
+            if hasattr(obj, "RigidBodies"):
+                for rb in obj.RigidBodies:
+                    if rb is not None:
+                        try:
+                            rb.ViewObject.Visibility = visible
+                        except Exception:
+                            pass
+
     def onDelete(self, vobj, subelements):
         return True
 
