@@ -46,57 +46,101 @@ def apply_frame(frame, doc=None):
 # Collision shape factory
 # ---------------------------------------------------------------------------
 
+def _surface_type_names(fc_shape):
+    names = []
+    for face in fc_shape.Faces:
+        try:
+            names.append(type(face.Surface).__name__)
+        except Exception:
+            names.append("")
+    return names
+
+
 def _detect_freecad_shape_type(fc_shape):
     """
-    Return 'sphere', 'cylinder', or 'box' by inspecting FreeCAD face surfaces.
-    Falls back to 'box' for anything unrecognised.
+    Classify fc_shape as 'sphere', 'cylinder', 'box', or 'mesh'.
+
+    'mesh' is returned for any custom or irregular solid so that it gets
+    an accurate tessellated collision shape instead of a bounding box.
     """
     faces = fc_shape.Faces
     if not faces:
         return "box"
 
-    surface_class_names = []
-    for face in faces:
-        try:
-            surface_class_names.append(type(face.Surface).__name__)
-        except Exception:
-            surface_class_names.append("")
+    names = _surface_type_names(fc_shape)
 
-    # Sphere: single face whose Surface is a Part.Sphere
-    if len(faces) == 1 and "Sphere" in surface_class_names[0]:
+    # Sphere: one face with a spherical surface
+    if len(faces) == 1 and "Sphere" in names[0]:
         return "sphere"
 
-    # Cylinder: three faces — one cylindrical + two planar caps
-    if len(faces) == 3 and any("Cylinder" in n for n in surface_class_names):
+    # Cylinder: 3 faces — one cylindrical lateral + two planar caps
+    if len(faces) == 3 and any("Cylinder" in n for n in names):
         return "cylinder"
 
-    return "box"
+    # Box: exactly 6 planar faces (Part::Box, or any extruded rectangle)
+    if len(faces) == 6 and all("Plane" in n for n in names):
+        return "box"
+
+    # Cone: 2 faces (one conical, one planar base) — use mesh
+    # Any other solid with curved or mixed faces — use mesh
+    return "mesh"
 
 
-def _make_collision_shape(p, fc_shape, half_extents, client):
+def _tessellate_to_local(fc_shape, orig_pl, world_center):
     """
-    Create the most accurate pybullet collision shape for *fc_shape*.
+    Tessellate fc_shape and return (vertices, flat_indices) in body-local space.
 
-    Returns (collision_shape_id, characteristic_radius_m) where
-    characteristic_radius is a representative size used for CCD thresholds.
+    Body-local space is centred at world_center (the bbox centre) and has the
+    same orientation as orig_pl.  Coordinates are in metres.
+
+    Precision is adaptive: 2 % of the smallest bbox dimension, clamped to
+    [0.05 mm, 5 mm].
+    """
+    bb = fc_shape.BoundBox
+    precision = max(0.05, min(5.0, min(bb.XLength, bb.YLength, bb.ZLength) * 0.02))
+
+    verts_world, tri_faces = fc_shape.tessellate(precision)
+    if not verts_world or not tri_faces:
+        raise ValueError("tessellate() returned an empty mesh")
+
+    inv_rot = orig_pl.Rotation.inverted()
+    verts_local = []
+    for v in verts_world:
+        # Translate to bbox-centre-relative, then rotate into body-local frame
+        rel = FreeCAD.Vector(v.x - world_center.x,
+                             v.y - world_center.y,
+                             v.z - world_center.z)
+        lv = inv_rot.multVec(rel)
+        verts_local.append([lv.x * MM_TO_M, lv.y * MM_TO_M, lv.z * MM_TO_M])
+
+    flat_indices = [i for tri in tri_faces for i in tri]
+    return verts_local, flat_indices
+
+
+def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
+                          client, is_static=False):
+    """
+    Create the most accurate pybullet collision shape for fc_shape.
+
+    For recognised primitives (sphere, cylinder, box) the exact analytic shape
+    is used.  For any other solid a mesh is tessellated from the FreeCAD shape:
+      - static bodies  (mass=0): full triangle mesh → exact concave collision
+      - dynamic bodies (mass>0): convex hull  → pybullet builds it automatically
+
+    Returns (collision_shape_id, characteristic_radius_m).
     """
     shape_type = _detect_freecad_shape_type(fc_shape)
     hx, hy, hz = half_extents
 
     if shape_type == "sphere":
-        # Use the average of the three half-extents as the radius (handles
-        # slight floating-point asymmetry in the bounding box).
         radius = (hx + hy + hz) / 3.0
         col = p.createCollisionShape(
             p.GEOM_SPHERE, radius=radius, physicsClientId=client)
         return col, radius
 
     if shape_type == "cylinder":
-        # The cylinder axis is the tallest bbox dimension.
-        # pybullet GEOM_CYLINDER is always Z-axis aligned; we match that by
-        # choosing the tallest half-extent as the half-height.
         half_sorted = sorted([hx, hy, hz])
-        radius    = (half_sorted[0] + half_sorted[1]) / 2.0
+        radius     = (half_sorted[0] + half_sorted[1]) / 2.0
         halfHeight = half_sorted[2]
         col = p.createCollisionShape(
             p.GEOM_CYLINDER,
@@ -106,10 +150,37 @@ def _make_collision_shape(p, fc_shape, half_extents, client):
         )
         return col, radius
 
-    # Default: axis-aligned box
-    col = p.createCollisionShape(
-        p.GEOM_BOX, halfExtents=half_extents, physicsClientId=client)
-    return col, min(half_extents)
+    if shape_type == "box":
+        col = p.createCollisionShape(
+            p.GEOM_BOX, halfExtents=half_extents, physicsClientId=client)
+        return col, min(half_extents)
+
+    # --- Custom mesh shape ---
+    try:
+        verts, indices = _tessellate_to_local(fc_shape, orig_pl, world_center)
+
+        flags = (p.GEOM_CONCAVE_INTERNAL_EDGE if is_static else 0)
+        col = p.createCollisionShape(
+            p.GEOM_MESH,
+            vertices=verts,
+            indices=indices,
+            flags=flags,
+            physicsClientId=client,
+        )
+        kind = "concave mesh" if is_static else "convex-hull mesh"
+        FreeCAD.Console.PrintMessage(
+            f"BulletPhysics: {kind} ({len(verts)} verts, "
+            f"{len(indices)//3} tris) for custom shape\n"
+        )
+        return col, min(half_extents)
+
+    except Exception as exc:
+        FreeCAD.Console.PrintWarning(
+            f"BulletPhysics: mesh failed ({exc}), falling back to bounding box\n"
+        )
+        col = p.createCollisionShape(
+            p.GEOM_BOX, halfExtents=half_extents, physicsClientId=client)
+        return col, min(half_extents)
 
 
 # ---------------------------------------------------------------------------
@@ -212,8 +283,10 @@ def run_simulation(callback=None):
                         world_center.y * MM_TO_M,
                         world_center.z * MM_TO_M]
 
+            is_static = (rb.BodyType == "Passive")
             col, characteristic_radius = _make_collision_shape(
-                p, shape, half, client)
+                p, shape, half, orig_pl, world_center, client,
+                is_static=is_static)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             mass  = rb.Mass if rb.BodyType == "Active" else 0.0
