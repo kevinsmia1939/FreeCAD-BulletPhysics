@@ -242,17 +242,22 @@ def run_simulation(callback=None):
     gy = d.y / length * gravity_mag
     gz = d.z / length * gravity_mag
 
+    # Each recorded frame covers exactly time_step seconds.  Sub-stepping
+    # divides that interval into sub_steps smaller Bullet ticks for better
+    # collision accuracy without changing playback speed or total duration.
+    bullet_tick = time_step / sub_steps
+
     FreeCAD.Console.PrintMessage(
         f"BulletPhysics: starting simulation — "
-        f"steps={steps}, Δt={time_step*1000:.3f} ms, "
-        f"subSteps={sub_steps}, "
+        f"steps={steps}, frame={time_step*1000:.3f} ms, "
+        f"subSteps={sub_steps}, tick={bullet_tick*1000:.3f} ms, "
         f"gravity=({gx:.3f}, {gy:.3f}, {gz:.3f}) m/s², "
         f"solverIterations={solver_iters}\n"
     )
 
     client = p.connect(p.DIRECT)
     p.setGravity(gx, gy, gz, physicsClientId=client)
-    p.setTimeStep(time_step, physicsClientId=client)
+    p.setTimeStep(bullet_tick, physicsClientId=client)
     p.setPhysicsEngineParameter(
         numSolverIterations=solver_iters, physicsClientId=client)
 
@@ -361,10 +366,7 @@ def run_simulation(callback=None):
             if callback:
                 callback(step + 1, steps)
 
-        # Return frames together with the real wall-clock time each frame
-        # represents: one recorded frame = sub_steps Bullet ticks × time_step.
-        time_per_frame = time_step * sub_steps
-        return frames, time_per_frame
+        return frames, time_step
 
     finally:
         p.disconnect(client)

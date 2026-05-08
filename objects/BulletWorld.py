@@ -12,7 +12,9 @@ class BulletWorldFeature:
         obj.GravityDirection = FreeCAD.Vector(0, 0, -1)
 
         obj.addProperty("App::PropertyFloat", "TimeStep", "Simulation",
-                        "Physics time step in seconds (e.g. 1/60 ≈ 0.01667)")
+                        "Duration of each recorded frame in seconds (e.g. 1/60 ≈ 0.01667). "
+                        "The Bullet tick = TimeStep / SubSteps, so increasing SubSteps "
+                        "improves accuracy without changing playback speed or total duration.")
         obj.TimeStep = 1.0 / 60.0
 
         obj.addProperty("App::PropertyInteger", "Steps", "Simulation",
