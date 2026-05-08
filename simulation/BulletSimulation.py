@@ -310,13 +310,16 @@ def run_simulation(callback=None):
                 physicsClientId=client,
             )
 
-            # Enable CCD for active bodies so fast-moving objects don't tunnel
-            # through thin surfaces between steps.  Setting ccdSweptSphereRadius
-            # to a fraction of the object size activates Bullet's swept-sphere CCD.
+            # Active bodies: enable CCD and prevent Bullet from sleeping them.
+            # Bullet can immediately deactivate a body created at rest (zero
+            # velocity) before gravity has had a chance to act, causing the body
+            # to appear frozen during freefall until a collision wakes it up.
+            # activationState=4 == DISABLE_DEACTIVATION in Bullet's enum.
             if mass > 0:
                 p.changeDynamics(
                     body_id, -1,
                     ccdSweptSphereRadius=characteristic_radius * 0.4,
+                    activationState=4,
                     physicsClientId=client,
                 )
 
