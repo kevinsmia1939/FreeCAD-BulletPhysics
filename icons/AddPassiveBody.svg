@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Passive (static) rigid body: flat grey box representing a floor/wall -->
+  <defs>
+    <linearGradient id="passiveGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#aabccc"/>
+      <stop offset="100%" stop-color="#5c7a9e"/>
+    </linearGradient>
+  </defs>
+  <!-- flat slab -->
+  <rect x="8" y="36" width="48" height="16" rx="3"
+        fill="url(#passiveGrad)" stroke="#3a5a7e" stroke-width="2"/>
+  <!-- top face highlight -->
+  <rect x="8" y="36" width="48" height="5" rx="3"
+        fill="#ccdcec" opacity="0.6"/>
+  <!-- lock symbol to indicate static -->
+  <rect x="25" y="12" width="14" height="11" rx="2"
+        fill="#3a5a7e" stroke="#1a3a5e" stroke-width="1.5"/>
+  <path d="M 25 18 A 7 7 0 0 1 39 18" fill="none"
+        stroke="#3a5a7e" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="19" r="2.5" fill="white"/>
+  <!-- plus badge (add) -->
+  <circle cx="52" cy="12" r="10" fill="#2ecc40" stroke="white" stroke-width="1.5"/>
+  <line x1="52" y1="7" x2="52" y2="17" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="47" y1="12" x2="57" y2="12" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

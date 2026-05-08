@@ -1,0 +1,34 @@
+import os
+
+MOD_PATH = os.path.dirname(__file__)
+
+
+class BulletPhysicsWorkbench(Workbench):
+    MenuText = "Bullet Physics"
+    ToolTip = "Bullet Physics rigid body simulation"
+    Icon = os.path.join(MOD_PATH, "icons", "BulletPhysics.svg")
+
+    def Initialize(self):
+        import commands.CmdAddRigidBody
+        import commands.CmdRunSimulation
+
+        tool_list = [
+            "BulletPhysics_AddActiveBody",
+            "BulletPhysics_AddPassiveBody",
+            "Separator",
+            "BulletPhysics_RunSimulation",
+        ]
+        self.appendToolbar("Bullet Physics", tool_list)
+        self.appendMenu("&Bullet Physics", tool_list)
+
+    def Activated(self):
+        pass
+
+    def Deactivated(self):
+        pass
+
+    def GetClassName(self):
+        return "Gui::PythonWorkbench"
+
+
+FreeCADGui.addWorkbench(BulletPhysicsWorkbench())
