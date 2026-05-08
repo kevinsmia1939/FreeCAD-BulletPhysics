@@ -5,6 +5,8 @@ class BulletContainerFeature:
     def __init__(self, obj):
         obj.addProperty("App::PropertyLink", "World", "Container",
                         "Physics World settings object")
+        obj.addProperty("App::PropertyLink", "BodyTable", "Container",
+                        "Rigid body summary table")
         obj.addProperty("App::PropertyLinkList", "RigidBodies", "Container",
                         "Rigid body objects managed by this simulation")
         obj.Proxy = self
@@ -36,6 +38,8 @@ class BulletContainerViewProvider:
         children = []
         if hasattr(obj, "World") and obj.World is not None:
             children.append(obj.World)
+        if hasattr(obj, "BodyTable") and obj.BodyTable is not None:
+            children.append(obj.BodyTable)
         if hasattr(obj, "RigidBodies"):
             children.extend(rb for rb in obj.RigidBodies if rb is not None)
         return children
@@ -87,6 +91,7 @@ def make_container(doc=None):
         doc = FreeCAD.ActiveDocument
 
     from objects.BulletWorld import BulletWorldFeature, BulletWorldViewProvider
+    from objects.BulletBodyTable import make_body_table
 
     # Container
     container = doc.addObject("App::FeaturePython", "BulletPhysics")
@@ -97,8 +102,11 @@ def make_container(doc=None):
     world = doc.addObject("App::FeaturePython", "BulletWorld")
     BulletWorldFeature(world)
     world.Label = "Physics World"
-
     container.World = world
+
+    # Body summary table inside container
+    table = make_body_table(doc)
+    container.BodyTable = table
 
     if FreeCAD.GuiUp:
         import FreeCADGui

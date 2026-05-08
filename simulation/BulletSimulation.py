@@ -298,7 +298,12 @@ def run_simulation(callback=None):
                 is_static=is_static, mesh_resolution=mesh_resolution)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
-            mass  = rb.Mass if rb.BodyType == "Active" else 0.0
+            if rb.BodyType == "Active":
+                density    = getattr(rb, "Density", 1000.0)
+                volume_m3  = shape.Volume * 1e-9   # mm³ → m³
+                mass       = density * volume_m3
+            else:
+                mass = 0.0
 
             body_id = p.createMultiBody(
                 baseMass=mass,

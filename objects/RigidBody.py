@@ -15,9 +15,10 @@ class RigidBodyFeature:
         obj.addProperty("App::PropertyEnumeration", "BodyType", "RigidBody",
                         "Active: moved by physics.  Passive: static collider.")
         obj.BodyType = ["Active", "Passive"]
-        obj.addProperty("App::PropertyFloat", "Mass", "RigidBody",
-                        "Mass in kg (ignored for Passive bodies)")
-        obj.Mass = 1.0
+        obj.addProperty("App::PropertyFloat", "Density", "RigidBody",
+                        "Material density in kg/m³. Mass is computed automatically "
+                        "as density × shape volume. Ignored for Passive bodies.")
+        obj.Density = 1000.0
         obj.addProperty("App::PropertyFloat", "Restitution", "RigidBody",
                         "Bounciness 0 (none) → 1 (perfect)")
         obj.Restitution = 0.3
