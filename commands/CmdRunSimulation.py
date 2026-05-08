@@ -141,20 +141,22 @@ class SimulationPanel:
         world = find_world()
         if world:
             d = world.GravityDirection
+            sub_steps = max(1, getattr(world, "SubSteps", 4))
+            frame_ms = world.TimeStep * sub_steps * 1000
             self._world_label.setText(
                 f"<b>Physics World:</b> {world.Label}<br>"
                 f"Gravity: {world.Gravity:.2f} m/s²  "
                 f"dir ({d.x:.1f}, {d.y:.1f}, {d.z:.1f})<br>"
                 f"Steps: {world.Steps}  ·  "
-                f"Δt: {world.TimeStep*1000:.2f} ms"
+                f"Δt: {world.TimeStep*1000:.2f} ms  ·  "
+                f"SubSteps: {sub_steps}  ·  "
+                f"Frame: {frame_ms:.2f} ms"
             )
-            self.time_step = world.TimeStep
         else:
             self._world_label.setText(
                 "<i>No Physics World found.<br>"
                 "Create a container first.</i>"
             )
-            self.time_step = 1.0 / 60.0
 
     # ── Simulation ──────────────────────────────────────────────────────────
 
@@ -170,14 +172,14 @@ class SimulationPanel:
             self.progress.setValue(int(done * 100 / total))
             QtWidgets.QApplication.processEvents()
 
-        frames = run_simulation(callback=cb)
+        result = run_simulation(callback=cb)
         self.sim_btn.setEnabled(True)
 
-        if not frames:
+        if not result:
             self.sim_status.setText("Simulation failed — see Report View.")
             return
 
-        self.frames = frames
+        self.frames, self.time_step = result
         n = len(self.frames) - 1
         total_secs = n * self.time_step
         self.sim_status.setText(

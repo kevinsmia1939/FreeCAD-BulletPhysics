@@ -358,7 +358,10 @@ def run_simulation(callback=None):
             if callback:
                 callback(step + 1, steps)
 
-        return frames
+        # Return frames together with the real wall-clock time each frame
+        # represents: one recorded frame = sub_steps Bullet ticks × time_step.
+        time_per_frame = time_step * sub_steps
+        return frames, time_per_frame
 
     finally:
         p.disconnect(client)
