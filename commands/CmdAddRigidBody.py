@@ -1,8 +1,15 @@
-import os
 import FreeCAD
 import FreeCADGui
 
-MOD_PATH = os.path.dirname(os.path.dirname(__file__))
+try:
+    from PySide2.QtWidgets import QMessageBox
+except ImportError:
+    from PySide.QtWidgets import QMessageBox
+
+
+def _mod_path():
+    import BulletUtils
+    return BulletUtils.MOD_PATH
 
 
 def _has_shape(obj):
@@ -13,14 +20,30 @@ def _selection_has_shapes():
     return any(_has_shape(o) for o in FreeCADGui.Selection.getSelection())
 
 
+def _require_container():
+    """Return the container or show an error and return None."""
+    from objects.BulletContainer import find_container
+    c = find_container()
+    if c is None:
+        QMessageBox.warning(
+            None,
+            "No Physics Container",
+            "Create a Physics Container first.\n\n"
+            "Use: Bullet Physics → Create Physics Container",
+        )
+    return c
+
+
 class AddActiveBodyCommand:
     def GetResources(self):
+        import os
         return {
-            "Pixmap": os.path.join(MOD_PATH, "icons", "AddActiveBody.svg"),
+            "Pixmap": os.path.join(_mod_path(), "icons", "AddActiveBody.svg"),
             "MenuText": "Add Active Rigid Body",
             "ToolTip": (
                 "Mark the selected solid as an active rigid body.\n"
-                "Active bodies are affected by gravity and collisions."
+                "An App::Link clone is created inside the container;\n"
+                "the original solid is not modified."
             ),
         }
 
@@ -28,24 +51,29 @@ class AddActiveBodyCommand:
         return FreeCAD.ActiveDocument is not None and _selection_has_shapes()
 
     def Activated(self):
-        from objects.RigidBody import makeRigidBody
+        from objects.RigidBody import make_rigid_body
+        container = _require_container()
+        if container is None:
+            return
         sel = [o for o in FreeCADGui.Selection.getSelection() if _has_shape(o)]
         if not sel:
             return
         FreeCAD.ActiveDocument.openTransaction("Add Active Rigid Body")
         for obj in sel:
-            makeRigidBody(obj, "Active")
+            make_rigid_body(obj, "Active", container=container)
         FreeCAD.ActiveDocument.commitTransaction()
 
 
 class AddPassiveBodyCommand:
     def GetResources(self):
+        import os
         return {
-            "Pixmap": os.path.join(MOD_PATH, "icons", "AddPassiveBody.svg"),
+            "Pixmap": os.path.join(_mod_path(), "icons", "AddPassiveBody.svg"),
             "MenuText": "Add Passive Rigid Body",
             "ToolTip": (
-                "Mark the selected solid as a passive rigid body.\n"
-                "Passive bodies are static colliders (e.g. a floor or wall)."
+                "Mark the selected solid as a passive (static) rigid body.\n"
+                "An App::Link clone is created inside the container;\n"
+                "the original solid is not modified."
             ),
         }
 
@@ -53,13 +81,16 @@ class AddPassiveBodyCommand:
         return FreeCAD.ActiveDocument is not None and _selection_has_shapes()
 
     def Activated(self):
-        from objects.RigidBody import makeRigidBody
+        from objects.RigidBody import make_rigid_body
+        container = _require_container()
+        if container is None:
+            return
         sel = [o for o in FreeCADGui.Selection.getSelection() if _has_shape(o)]
         if not sel:
             return
         FreeCAD.ActiveDocument.openTransaction("Add Passive Rigid Body")
         for obj in sel:
-            makeRigidBody(obj, "Passive")
+            make_rigid_body(obj, "Passive", container=container)
         FreeCAD.ActiveDocument.commitTransaction()
 
 

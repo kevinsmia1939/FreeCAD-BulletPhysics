@@ -18,10 +18,10 @@ def _mod_path():
 # ---------------------------------------------------------------------------
 
 class SimulationPanel:
-    """FreeCAD task panel: simulate then play back with a timeline scrubber."""
+    """Task panel: simulate (using BulletWorld settings) then play back."""
 
     def __init__(self):
-        self.frames = []        # list of frame dicts
+        self.frames = []
         self.time_step = 1.0 / 60.0
         self._playing = False
 
@@ -30,33 +30,25 @@ class SimulationPanel:
         root = QtWidgets.QVBoxLayout(self.form)
         root.setSpacing(6)
 
-        # ── Simulate section ────────────────────────────────────────────────
+        # ── Simulation section ───────────────────────────────────────────────
         sim_group = QtWidgets.QGroupBox("Simulation")
-        sim_layout = QtWidgets.QFormLayout(sim_group)
+        sim_layout = QtWidgets.QVBoxLayout(sim_group)
 
-        self.steps_spin = QtWidgets.QSpinBox()
-        self.steps_spin.setRange(10, 50000)
-        self.steps_spin.setValue(500)
-        self.steps_spin.setSuffix(" steps")
-        sim_layout.addRow("Steps:", self.steps_spin)
-
-        self.hz_spin = QtWidgets.QDoubleSpinBox()
-        self.hz_spin.setRange(1.0, 240.0)
-        self.hz_spin.setValue(60.0)
-        self.hz_spin.setSuffix(" Hz")
-        sim_layout.addRow("Step rate:", self.hz_spin)
+        self._world_label = QtWidgets.QLabel()
+        self._world_label.setWordWrap(True)
+        sim_layout.addWidget(self._world_label)
 
         self.sim_btn = QtWidgets.QPushButton("Simulate")
         self.sim_btn.setIcon(
             self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPlay))
-        sim_layout.addRow(self.sim_btn)
+        sim_layout.addWidget(self.sim_btn)
 
         self.progress = QtWidgets.QProgressBar()
         self.progress.setRange(0, 100)
-        sim_layout.addRow(self.progress)
+        sim_layout.addWidget(self.progress)
 
         self.sim_status = QtWidgets.QLabel("Ready.")
-        sim_layout.addRow(self.sim_status)
+        sim_layout.addWidget(self.sim_status)
 
         root.addWidget(sim_group)
 
@@ -64,22 +56,19 @@ class SimulationPanel:
         play_group = QtWidgets.QGroupBox("Playback")
         play_layout = QtWidgets.QVBoxLayout(play_group)
 
-        # Timeline slider
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.setEnabled(False)
         self.slider.setTickPosition(QtWidgets.QSlider.TicksBelow)
-        self.slider.setTickInterval(1)
         play_layout.addWidget(self.slider)
 
-        # Frame label
         self.frame_label = QtWidgets.QLabel("Frame — / —  (—)")
         self.frame_label.setAlignment(QtCore.Qt.AlignCenter)
         play_layout.addWidget(self.frame_label)
 
-        # Transport buttons
+        # Transport row
         transport = QtWidgets.QHBoxLayout()
-        transport.setSpacing(4)
+        transport.setSpacing(2)
 
         def _tb(icon_name, tip):
             btn = QtWidgets.QToolButton()
@@ -107,7 +96,7 @@ class SimulationPanel:
         self.speed_combo = QtWidgets.QComboBox()
         for label in ("0.1×", "0.25×", "0.5×", "1×", "2×", "4×", "8×"):
             self.speed_combo.addItem(label)
-        self.speed_combo.setCurrentIndex(3)   # 1×
+        self.speed_combo.setCurrentIndex(3)
         self.speed_combo.setEnabled(False)
         opts.addWidget(self.speed_combo)
         opts.addStretch()
@@ -133,24 +122,45 @@ class SimulationPanel:
         self.btn_end.clicked.connect(self._go_end)
         self.speed_combo.currentIndexChanged.connect(self._update_timer_interval)
 
+        self._refresh_world_label()
+
+    # ── World info ──────────────────────────────────────────────────────────
+
+    def _refresh_world_label(self):
+        from objects.BulletWorld import find_world
+        world = find_world()
+        if world:
+            d = world.GravityDirection
+            self._world_label.setText(
+                f"<b>Physics World:</b> {world.Label}<br>"
+                f"Gravity: {world.Gravity:.2f} m/s²  "
+                f"dir ({d.x:.1f}, {d.y:.1f}, {d.z:.1f})<br>"
+                f"Steps: {world.Steps}  ·  "
+                f"Δt: {world.TimeStep*1000:.2f} ms"
+            )
+            self.time_step = world.TimeStep
+        else:
+            self._world_label.setText(
+                "<i>No Physics World found.<br>"
+                "Create a container first.</i>"
+            )
+            self.time_step = 1.0 / 60.0
+
     # ── Simulation ──────────────────────────────────────────────────────────
 
     def _run_simulation(self):
         from simulation.BulletSimulation import run_simulation, apply_frame
         self._stop()
+        self._refresh_world_label()
         self.sim_btn.setEnabled(False)
         self.progress.setValue(0)
         self.sim_status.setText("Running…")
-
-        steps = self.steps_spin.value()
-        self.time_step = 1.0 / self.hz_spin.value()
 
         def cb(done, total):
             self.progress.setValue(int(done * 100 / total))
             QtWidgets.QApplication.processEvents()
 
-        frames = run_simulation(steps=steps, time_step=self.time_step, callback=cb)
-
+        frames = run_simulation(callback=cb)
         self.sim_btn.setEnabled(True)
 
         if not frames:
@@ -158,15 +168,13 @@ class SimulationPanel:
             return
 
         self.frames = frames
-        n = len(self.frames) - 1  # excludes frame 0 (initial)
+        n = len(self.frames) - 1
         total_secs = n * self.time_step
         self.sim_status.setText(
             f"Done — {n} steps  ({total_secs:.2f} s simulated)")
 
-        # Re-apply frame 0 (initial positions)
         apply_frame(self.frames[0])
 
-        # Enable playback controls
         self.slider.setRange(0, len(self.frames) - 1)
         self.slider.setValue(0)
         self.slider.setEnabled(True)
@@ -185,8 +193,8 @@ class SimulationPanel:
 
     def _update_timer_interval(self):
         if self._playing:
-            interval_ms = max(1, int(self.time_step * 1000 / self._speed_multiplier()))
-            self.timer.setInterval(interval_ms)
+            ms = max(1, int(self.time_step * 1000 / self._speed_multiplier()))
+            self.timer.setInterval(ms)
 
     def _update_frame_label(self, idx):
         if not self.frames:
@@ -196,14 +204,11 @@ class SimulationPanel:
         t = idx * self.time_step
         self.frame_label.setText(f"Frame {idx} / {total}  ({t:.3f} s)")
 
-    def _apply_current(self, idx):
-        from simulation.BulletSimulation import apply_frame
-        apply_frame(self.frames[idx])
-        self._update_frame_label(idx)
-
     def _on_slider(self, value):
         if self.frames:
-            self._apply_current(value)
+            from simulation.BulletSimulation import apply_frame
+            apply_frame(self.frames[value])
+            self._update_frame_label(value)
 
     def _go_start(self):
         self._stop()
@@ -231,8 +236,8 @@ class SimulationPanel:
         self._playing = True
         self.btn_play.setIcon(
             self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
-        interval_ms = max(1, int(self.time_step * 1000 / self._speed_multiplier()))
-        self.timer.start(interval_ms)
+        ms = max(1, int(self.time_step * 1000 / self._speed_multiplier()))
+        self.timer.start(ms)
 
     def _stop(self):
         self._playing = False
@@ -248,9 +253,7 @@ class SimulationPanel:
             else:
                 self._stop()
                 return
-        self.slider.setValue(next_idx)   # triggers _on_slider → apply_frame
-
-    # ── FreeCAD task panel protocol ─────────────────────────────────────────
+        self.slider.setValue(next_idx)
 
     def reject(self):
         self._stop()
@@ -266,7 +269,7 @@ class RunSimulationCommand:
         return {
             "Pixmap": os.path.join(_mod_path(), "icons", "RunSimulation.svg"),
             "MenuText": "Run Simulation",
-            "ToolTip": "Simulate and play back Bullet Physics with a timeline.",
+            "ToolTip": "Simulate and play back with timeline. Settings from Physics World.",
         }
 
     def IsActive(self):
