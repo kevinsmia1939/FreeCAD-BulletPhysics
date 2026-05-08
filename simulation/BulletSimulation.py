@@ -434,6 +434,18 @@ def load_simulation_cache(doc=None):
         return None
 
 
+def delete_simulation_cache(doc=None):
+    """Delete the cache file for *doc*. Returns True if deleted, False if none existed."""
+    import os
+    path = _cache_path(doc)
+    if path and os.path.exists(path):
+        os.remove(path)
+        FreeCAD.Console.PrintMessage(
+            f"BulletPhysics: simulation cache deleted — {path}\n")
+        return True
+    return False
+
+
 def _show_install_error():
     try:
         from PySide2.QtWidgets import QMessageBox

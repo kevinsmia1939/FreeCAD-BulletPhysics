@@ -114,6 +114,13 @@ class SimulationPanel:
             "positions before the simulation was run.")
         play_layout.addWidget(self.reset_btn)
 
+        self.delete_cache_btn = QtWidgets.QPushButton("Delete Cache")
+        self.delete_cache_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_TrashIcon))
+        self.delete_cache_btn.setToolTip(
+            "Delete the saved simulation cache file from disk.")
+        play_layout.addWidget(self.delete_cache_btn)
+
         root.addWidget(play_group)
         root.addStretch()
 
@@ -124,6 +131,7 @@ class SimulationPanel:
         # ── Wiring ────────────────────────────────────────────────────────────
         self.sim_btn.clicked.connect(self._run_simulation)
         self.reset_btn.clicked.connect(self._reset)
+        self.delete_cache_btn.clicked.connect(self._delete_cache)
         self.slider.valueChanged.connect(self._on_slider)
         self.btn_start.clicked.connect(self._go_start)
         self.btn_back.clicked.connect(self._step_back)
@@ -302,6 +310,23 @@ class SimulationPanel:
             self.slider.setValue(0)
             self.slider.blockSignals(False)
             self._update_frame_label(0)
+
+    def _delete_cache(self):
+        from simulation.BulletSimulation import delete_simulation_cache
+        deleted = delete_simulation_cache()
+        if deleted:
+            self.frames = []
+            self.time_step = 1.0 / 60.0
+            self.slider.setRange(0, 0)
+            self.slider.setEnabled(False)
+            self.speed_combo.setEnabled(False)
+            for btn in (self.btn_start, self.btn_back, self.btn_play,
+                        self.btn_forward, self.btn_end):
+                btn.setEnabled(False)
+            self._update_frame_label(0)
+            self.sim_status.setText("Cache deleted.")
+        else:
+            self.sim_status.setText("No cache file found.")
 
     def reject(self):
         self._stop()
