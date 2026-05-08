@@ -86,19 +86,15 @@ def _detect_freecad_shape_type(fc_shape):
     return "mesh"
 
 
-def _tessellate_to_local(fc_shape, orig_pl, world_center):
+def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
     """
     Tessellate fc_shape and return (vertices, flat_indices) in body-local space.
 
     Body-local space is centred at world_center (the bbox centre) and has the
     same orientation as orig_pl.  Coordinates are in metres.
 
-    Precision is adaptive: 2 % of the smallest bbox dimension, clamped to
-    [0.05 mm, 5 mm].
+    *precision* is the maximum chord deviation in mm (from MeshResolution).
     """
-    bb = fc_shape.BoundBox
-    precision = max(0.05, min(5.0, min(bb.XLength, bb.YLength, bb.ZLength) * 0.02))
-
     verts_world, tri_faces = fc_shape.tessellate(precision)
     if not verts_world or not tri_faces:
         raise ValueError("tessellate() returned an empty mesh")
@@ -118,7 +114,7 @@ def _tessellate_to_local(fc_shape, orig_pl, world_center):
 
 
 def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
-                          client, is_static=False):
+                          client, is_static=False, mesh_resolution=1.0):
     """
     Create the most accurate pybullet collision shape for fc_shape.
 
@@ -157,7 +153,8 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
 
     # --- Custom mesh shape ---
     try:
-        verts, indices = _tessellate_to_local(fc_shape, orig_pl, world_center)
+        verts, indices = _tessellate_to_local(
+            fc_shape, orig_pl, world_center, mesh_resolution)
 
         flags = (p.GEOM_CONCAVE_INTERNAL_EDGE if is_static else 0)
         col = p.createCollisionShape(
@@ -170,7 +167,7 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         kind = "concave mesh" if is_static else "convex-hull mesh"
         FreeCAD.Console.PrintMessage(
             f"BulletPhysics: {kind} ({len(verts)} verts, "
-            f"{len(indices)//3} tris) for custom shape\n"
+            f"{len(indices)//3} tris, res={mesh_resolution} mm) for custom shape\n"
         )
         return col, min(half_extents)
 
@@ -219,19 +216,21 @@ def run_simulation(callback=None):
         if hasattr(world.Proxy, "_ensure_properties"):
             world.Proxy._ensure_properties(world)
 
-        gravity_mag  = world.Gravity
-        gravity_dir  = world.GravityDirection
-        time_step    = world.TimeStep
-        steps        = world.Steps
-        solver_iters = world.SolverIterations
-        sub_steps    = max(1, getattr(world, "SubSteps", 4))
+        gravity_mag      = world.Gravity
+        gravity_dir      = world.GravityDirection
+        time_step        = world.TimeStep
+        steps            = world.Steps
+        solver_iters     = world.SolverIterations
+        sub_steps        = max(1, getattr(world, "SubSteps", 4))
+        mesh_resolution  = max(0.001, getattr(world, "MeshResolution", 1.0))
     else:
-        gravity_mag  = 9.81
-        gravity_dir  = FreeCAD.Vector(0, 0, -1)
-        time_step    = 1.0 / 60.0
-        steps        = 500
-        solver_iters = 10
-        sub_steps    = 4
+        gravity_mag      = 9.81
+        gravity_dir      = FreeCAD.Vector(0, 0, -1)
+        time_step        = 1.0 / 60.0
+        steps            = 500
+        solver_iters     = 10
+        sub_steps        = 4
+        mesh_resolution  = 1.0
 
     # Normalise direction
     d = gravity_dir
@@ -296,7 +295,7 @@ def run_simulation(callback=None):
             is_static = (rb.BodyType == "Passive")
             col, characteristic_radius = _make_collision_shape(
                 p, shape, half, orig_pl, world_center, client,
-                is_static=is_static)
+                is_static=is_static, mesh_resolution=mesh_resolution)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             mass  = rb.Mass if rb.BodyType == "Active" else 0.0

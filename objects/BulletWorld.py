@@ -31,6 +31,12 @@ class BulletWorldFeature:
                         "at the cost of simulation time (default 4)")
         obj.SubSteps = 4
 
+        obj.addProperty("App::PropertyFloat", "MeshResolution", "Simulation",
+                        "Tessellation chord deviation in mm for custom (non-primitive) "
+                        "collision shapes. Smaller = finer mesh, more accurate but slower. "
+                        "Primitives (box, sphere, cylinder) are unaffected.")
+        obj.MeshResolution = 1.0
+
         obj.Proxy = self
 
     def _ensure_properties(self, obj):
@@ -41,6 +47,12 @@ class BulletWorldFeature:
                             "Higher values prevent objects passing through each other "
                             "at the cost of simulation time (default 4)")
             obj.SubSteps = 4
+        if not hasattr(obj, "MeshResolution"):
+            obj.addProperty("App::PropertyFloat", "MeshResolution", "Simulation",
+                            "Tessellation chord deviation in mm for custom (non-primitive) "
+                            "collision shapes. Smaller = finer mesh, more accurate but slower. "
+                            "Primitives (box, sphere, cylinder) are unaffected.")
+            obj.MeshResolution = 1.0
 
     def execute(self, obj):
         pass
