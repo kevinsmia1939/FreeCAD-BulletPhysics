@@ -367,6 +367,73 @@ def run_simulation(callback=None):
         p.disconnect(client)
 
 
+# ---------------------------------------------------------------------------
+# Simulation cache (persisted to disk next to the .FCStd file)
+# ---------------------------------------------------------------------------
+
+def _cache_path(doc=None):
+    import os, tempfile
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    if doc is None:
+        return None
+    if doc.FileName:
+        base = os.path.splitext(doc.FileName)[0]
+        return base + "_bullet_cache.json"
+    return os.path.join(tempfile.gettempdir(),
+                        f"freecad_bullet_{doc.Name}.json")
+
+
+def save_simulation_cache(frames, time_per_frame, doc=None):
+    import json
+    path = _cache_path(doc)
+    if path is None:
+        return
+    data = {
+        "time_per_frame": time_per_frame,
+        "frames": [
+            {name: {"base": [pl.Base.x, pl.Base.y, pl.Base.z],
+                    "rotation": list(pl.Rotation.Q)}
+             for name, pl in frame.items()}
+            for frame in frames
+        ],
+    }
+    with open(path, "w") as f:
+        json.dump(data, f)
+    FreeCAD.Console.PrintMessage(
+        f"BulletPhysics: simulation cache saved → {path}\n")
+
+
+def load_simulation_cache(doc=None):
+    """Return (frames, time_per_frame) from the cache file, or None."""
+    import json, os
+    path = _cache_path(doc)
+    if path is None or not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        time_per_frame = float(data["time_per_frame"])
+        frames = []
+        for fd in data["frames"]:
+            frame = {}
+            for name, pd in fd.items():
+                b = pd["base"]
+                r = pd["rotation"]
+                frame[name] = FreeCAD.Placement(
+                    FreeCAD.Vector(b[0], b[1], b[2]),
+                    FreeCAD.Rotation(r[0], r[1], r[2], r[3]),
+                )
+            frames.append(frame)
+        FreeCAD.Console.PrintMessage(
+            f"BulletPhysics: loaded simulation cache ← {path}\n")
+        return frames, time_per_frame
+    except Exception as exc:
+        FreeCAD.Console.PrintWarning(
+            f"BulletPhysics: could not load cache ({exc})\n")
+        return None
+
+
 def _show_install_error():
     try:
         from PySide2.QtWidgets import QMessageBox

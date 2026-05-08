@@ -133,6 +133,7 @@ class SimulationPanel:
         self.speed_combo.currentIndexChanged.connect(self._update_timer_interval)
 
         self._refresh_world_label()
+        self._try_load_cache()
 
     # ── World info ──────────────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ class SimulationPanel:
     # ── Simulation ──────────────────────────────────────────────────────────
 
     def _run_simulation(self):
-        from simulation.BulletSimulation import run_simulation, apply_frame
+        from simulation.BulletSimulation import run_simulation
         self._stop()
         self._refresh_world_label()
         self.sim_btn.setEnabled(False)
@@ -180,13 +181,31 @@ class SimulationPanel:
             return
 
         self.frames, self.time_step = result
+        from simulation.BulletSimulation import save_simulation_cache
+        save_simulation_cache(self.frames, self.time_step)
+        self._populate_playback(apply_first_frame=True)
         n = len(self.frames) - 1
         total_secs = n * self.time_step
         self.sim_status.setText(
             f"Done — {n} steps  ({total_secs:.2f} s simulated)")
 
-        apply_frame(self.frames[0])
+    def _try_load_cache(self):
+        from simulation.BulletSimulation import load_simulation_cache
+        result = load_simulation_cache()
+        if result is None:
+            return
+        self.frames, self.time_step = result
+        self._populate_playback(apply_first_frame=False)
+        n = len(self.frames) - 1
+        total_secs = n * self.time_step
+        self.sim_status.setText(
+            f"Cache loaded — {n} steps  ({total_secs:.2f} s simulated)")
 
+    def _populate_playback(self, apply_first_frame=False):
+        """Enable all playback controls after frames are loaded."""
+        if apply_first_frame:
+            from simulation.BulletSimulation import apply_frame
+            apply_frame(self.frames[0])
         self.slider.setRange(0, len(self.frames) - 1)
         self.slider.setValue(0)
         self.slider.setEnabled(True)
