@@ -23,6 +23,12 @@ class BulletWorldFeature:
                         "Bullet constraint-solver iterations per step")
         obj.SolverIterations = 10
 
+        obj.addProperty("App::PropertyInteger", "SubSteps", "Simulation",
+                        "Physics sub-steps per recorded frame. "
+                        "Higher values prevent objects passing through each other "
+                        "at the cost of simulation time (default 4)")
+        obj.SubSteps = 4
+
         obj.Proxy = self
 
     def execute(self, obj):

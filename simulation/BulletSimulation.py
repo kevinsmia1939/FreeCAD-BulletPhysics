@@ -43,6 +43,76 @@ def apply_frame(frame, doc=None):
 
 
 # ---------------------------------------------------------------------------
+# Collision shape factory
+# ---------------------------------------------------------------------------
+
+def _detect_freecad_shape_type(fc_shape):
+    """
+    Return 'sphere', 'cylinder', or 'box' by inspecting FreeCAD face surfaces.
+    Falls back to 'box' for anything unrecognised.
+    """
+    faces = fc_shape.Faces
+    if not faces:
+        return "box"
+
+    surface_class_names = []
+    for face in faces:
+        try:
+            surface_class_names.append(type(face.Surface).__name__)
+        except Exception:
+            surface_class_names.append("")
+
+    # Sphere: single face whose Surface is a Part.Sphere
+    if len(faces) == 1 and "Sphere" in surface_class_names[0]:
+        return "sphere"
+
+    # Cylinder: three faces — one cylindrical + two planar caps
+    if len(faces) == 3 and any("Cylinder" in n for n in surface_class_names):
+        return "cylinder"
+
+    return "box"
+
+
+def _make_collision_shape(p, fc_shape, half_extents, client):
+    """
+    Create the most accurate pybullet collision shape for *fc_shape*.
+
+    Returns (collision_shape_id, characteristic_radius_m) where
+    characteristic_radius is a representative size used for CCD thresholds.
+    """
+    shape_type = _detect_freecad_shape_type(fc_shape)
+    hx, hy, hz = half_extents
+
+    if shape_type == "sphere":
+        # Use the average of the three half-extents as the radius (handles
+        # slight floating-point asymmetry in the bounding box).
+        radius = (hx + hy + hz) / 3.0
+        col = p.createCollisionShape(
+            p.GEOM_SPHERE, radius=radius, physicsClientId=client)
+        return col, radius
+
+    if shape_type == "cylinder":
+        # The cylinder axis is the tallest bbox dimension.
+        # pybullet GEOM_CYLINDER is always Z-axis aligned; we match that by
+        # choosing the tallest half-extent as the half-height.
+        half_sorted = sorted([hx, hy, hz])
+        radius    = (half_sorted[0] + half_sorted[1]) / 2.0
+        halfHeight = half_sorted[2]
+        col = p.createCollisionShape(
+            p.GEOM_CYLINDER,
+            radius=radius,
+            height=halfHeight * 2.0,
+            physicsClientId=client,
+        )
+        return col, radius
+
+    # Default: axis-aligned box
+    col = p.createCollisionShape(
+        p.GEOM_BOX, halfExtents=half_extents, physicsClientId=client)
+    return col, min(half_extents)
+
+
+# ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
 
@@ -78,12 +148,14 @@ def run_simulation(callback=None):
         time_step     = world.TimeStep
         steps         = world.Steps
         solver_iters  = world.SolverIterations
+        sub_steps     = max(1, world.SubSteps)
     else:
         gravity_mag   = 9.81
         gravity_dir   = FreeCAD.Vector(0, 0, -1)
         time_step     = 1.0 / 60.0
         steps         = 500
         solver_iters  = 10
+        sub_steps     = 4
 
     # Normalise direction
     d = gravity_dir
@@ -97,6 +169,7 @@ def run_simulation(callback=None):
     FreeCAD.Console.PrintMessage(
         f"BulletPhysics: starting simulation — "
         f"steps={steps}, Δt={time_step*1000:.3f} ms, "
+        f"subSteps={sub_steps}, "
         f"gravity=({gx:.3f}, {gy:.3f}, {gz:.3f}) m/s², "
         f"solverIterations={solver_iters}\n"
     )
@@ -139,8 +212,8 @@ def run_simulation(callback=None):
                         world_center.y * MM_TO_M,
                         world_center.z * MM_TO_M]
 
-            col = p.createCollisionShape(
-                p.GEOM_BOX, halfExtents=half, physicsClientId=client)
+            col, characteristic_radius = _make_collision_shape(
+                p, shape, half, client)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             mass  = rb.Mass if rb.BodyType == "Active" else 0.0
@@ -159,6 +232,16 @@ def run_simulation(callback=None):
                 physicsClientId=client,
             )
 
+            # Enable CCD for active bodies so fast-moving objects don't tunnel
+            # through thin surfaces between steps.  Setting ccdSweptSphereRadius
+            # to a fraction of the object size activates Bullet's swept-sphere CCD.
+            if mass > 0:
+                p.changeDynamics(
+                    body_id, -1,
+                    ccdSweptSphereRadius=characteristic_radius * 0.4,
+                    physicsClientId=client,
+                )
+
             # Local offset: placement origin → bbox centre in object's local frame
             local_offset = orig_pl.Rotation.inverted().multVec(
                 world_center - orig_pl.Base)
@@ -171,9 +254,10 @@ def run_simulation(callback=None):
             initial_frame[link.Name] = link.Placement.copy()
         frames = [initial_frame]
 
-        # Simulation loop
+        # Simulation loop — each recorded frame runs sub_steps Bullet ticks
         for step in range(steps):
-            p.stepSimulation(physicsClientId=client)
+            for _ in range(sub_steps):
+                p.stepSimulation(physicsClientId=client)
 
             frame = {}
             for body_id, (rb, link, local_offset) in body_map.items():
