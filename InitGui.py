@@ -1,12 +1,13 @@
-import os
-
-MOD_PATH = os.path.dirname(__file__)
-
-
 class BulletPhysicsWorkbench(Workbench):
     MenuText = "Bullet Physics"
     ToolTip = "Bullet Physics rigid body simulation"
-    Icon = os.path.join(MOD_PATH, "icons", "BulletPhysics.svg")
+
+    def __init__(self):
+        import os
+        import BulletUtils
+        self.__class__.Icon = os.path.join(
+            BulletUtils.MOD_PATH, "icons", "BulletPhysics.svg"
+        )
 
     def Initialize(self):
         import commands.CmdAddRigidBody
