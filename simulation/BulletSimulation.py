@@ -218,19 +218,21 @@ def run_simulation(callback=None):
 
         gravity_mag      = world.Gravity
         gravity_dir      = world.GravityDirection
+        end_time         = max(0.001, getattr(world, "EndTime", 10.0))
         time_step        = world.TimeStep
-        steps            = world.Steps
         solver_iters     = world.SolverIterations
         sub_steps        = max(1, getattr(world, "SubSteps", 4))
         mesh_resolution  = max(0.001, getattr(world, "MeshResolution", 1.0))
     else:
         gravity_mag      = 9.81
         gravity_dir      = FreeCAD.Vector(0, 0, -1)
+        end_time         = 10.0
         time_step        = 1.0 / 60.0
-        steps            = 500
         solver_iters     = 10
         sub_steps        = 4
         mesh_resolution  = 1.0
+
+    steps = max(1, round(end_time / time_step))
 
     # Normalise direction
     d = gravity_dir
@@ -248,7 +250,8 @@ def run_simulation(callback=None):
 
     FreeCAD.Console.PrintMessage(
         f"BulletPhysics: starting simulation — "
-        f"steps={steps}, frame={time_step*1000:.3f} ms, "
+        f"endTime={end_time:.3f} s, steps={steps}, "
+        f"frame={time_step*1000:.3f} ms, "
         f"subSteps={sub_steps}, tick={bullet_tick*1000:.3f} ms, "
         f"gravity=({gx:.3f}, {gy:.3f}, {gz:.3f}) m/s², "
         f"solverIterations={solver_iters}\n"

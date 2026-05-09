@@ -151,12 +151,13 @@ class SimulationPanel:
         if world:
             d = world.GravityDirection
             sub_steps = max(1, getattr(world, "SubSteps", 4))
-            tick_ms = world.TimeStep / sub_steps * 1000
+            end_time  = getattr(world, "EndTime", 10.0)
+            tick_ms   = world.TimeStep / sub_steps * 1000
             self._world_label.setText(
                 f"<b>Physics World:</b> {world.Label}<br>"
                 f"Gravity: {world.Gravity:.2f} m/s²  "
                 f"dir ({d.x:.1f}, {d.y:.1f}, {d.z:.1f})<br>"
-                f"Steps: {world.Steps}  ·  "
+                f"End time: {end_time:.2f} s  ·  "
                 f"Frame: {world.TimeStep*1000:.2f} ms  ·  "
                 f"SubSteps: {sub_steps}  ·  "
                 f"Tick: {tick_ms:.3f} ms"

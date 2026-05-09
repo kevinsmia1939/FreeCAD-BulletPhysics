@@ -11,15 +11,16 @@ class BulletWorldFeature:
                         "Gravity direction unit vector (default: −Z = downward)")
         obj.GravityDirection = FreeCAD.Vector(0, 0, -1)
 
+        obj.addProperty("App::PropertyFloat", "EndTime", "Simulation",
+                        "Total simulation duration in seconds. "
+                        "The number of recorded frames = EndTime / TimeStep.")
+        obj.EndTime = 10.0
+
         obj.addProperty("App::PropertyFloat", "TimeStep", "Simulation",
                         "Duration of each recorded frame in seconds (e.g. 1/60 ≈ 0.01667). "
                         "The Bullet tick = TimeStep / SubSteps, so increasing SubSteps "
                         "improves accuracy without changing playback speed or total duration.")
         obj.TimeStep = 1.0 / 60.0
-
-        obj.addProperty("App::PropertyInteger", "Steps", "Simulation",
-                        "Total number of simulation steps to record")
-        obj.Steps = 500
 
         obj.addProperty("App::PropertyInteger", "SolverIterations", "Simulation",
                         "Bullet constraint-solver iterations per step")
@@ -41,6 +42,14 @@ class BulletWorldFeature:
 
     def _ensure_properties(self, obj):
         """Add any properties that are missing (handles objects created by older code)."""
+        if not hasattr(obj, "EndTime"):
+            obj.addProperty("App::PropertyFloat", "EndTime", "Simulation",
+                            "Total simulation duration in seconds. "
+                            "The number of recorded frames = EndTime / TimeStep.")
+            # Migrate from old Steps property if present
+            old_steps = getattr(obj, "Steps", 500)
+            old_dt    = getattr(obj, "TimeStep", 1.0 / 60.0)
+            obj.EndTime = old_steps * old_dt
         if not hasattr(obj, "SubSteps"):
             obj.addProperty("App::PropertyInteger", "SubSteps", "Simulation",
                             "Physics sub-steps per recorded frame. "
