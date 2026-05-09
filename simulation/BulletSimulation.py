@@ -684,9 +684,10 @@ def create_collision_wireframes(doc=None):
         obj.Shape  = wf_shape
 
         if isinstance(extra, FreeCAD.Placement):
-            # Mesh / delta-placement mode: shape is already in world space.
-            # Leave Placement at identity; animation uses link_pl * orig_pl^{-1}.
-            obj.Placement = FreeCAD.Placement()
+            # Mesh mode: fc_shape.copy() strips the OCCT TopLoc_Location, leaving
+            # the geometry in object-local coordinates. Apply orig_pl so FreeCAD
+            # maps the local shape to world space correctly.
+            obj.Placement = extra          # extra == orig_pl
         else:
             local_offset = extra
             col_center = orig_pl.Base + orig_pl.Rotation.multVec(local_offset)
@@ -717,8 +718,8 @@ def update_collision_wireframes(wireframe_infos, frame):
             continue
         link_pl = frame[link_name]
         if isinstance(extra, FreeCAD.Placement):
-            # Delta placement: transform world-space shape by (link_pl * orig_pl^{-1})
-            obj.Placement = link_pl.multiply(extra.inverse())
+            # Mesh mode: shape is in local coords; link_pl is the new world placement.
+            obj.Placement = link_pl
         else:
             local_offset = extra
             col_center = link_pl.Base + link_pl.Rotation.multVec(local_offset)
