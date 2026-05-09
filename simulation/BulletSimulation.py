@@ -208,19 +208,34 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         verts, indices = _tessellate_to_local(
             fc_shape, orig_pl, world_center, mesh_resolution)
 
-        flags = (p.GEOM_CONCAVE_INTERNAL_EDGE if is_static else 0)
-        col = p.createCollisionShape(
-            p.GEOM_MESH,
-            vertices=verts,
-            indices=indices,
-            flags=flags,
-            physicsClientId=client,
-        )
-        kind = "concave mesh" if is_static else "convex-hull mesh"
-        FreeCAD.Console.PrintMessage(
-            f"BulletPhysics: {kind} ({len(verts)} verts, "
-            f"{len(indices)//3} tris, res={mesh_resolution} mm) for custom shape\n"
-        )
+        if is_static:
+            # Static body: full concave triangle mesh (btBvhTriangleMeshShape).
+            # Passing indices triggers pybullet to build a BVH mesh — valid only
+            # for mass=0 bodies; dynamic bodies need a convex shape.
+            col = p.createCollisionShape(
+                p.GEOM_MESH,
+                vertices=verts,
+                indices=indices,
+                flags=p.GEOM_CONCAVE_INTERNAL_EDGE,
+                physicsClientId=client,
+            )
+            FreeCAD.Console.PrintMessage(
+                f"BulletPhysics: concave mesh ({len(verts)} verts, "
+                f"{len(indices)//3} tris, res={mesh_resolution} mm) for custom shape\n"
+            )
+        else:
+            # Dynamic body: convex hull (btConvexHullShape).
+            # Omitting indices tells pybullet to build a convex hull from vertices,
+            # which IS valid for dynamic bodies and produces correct rotation.
+            col = p.createCollisionShape(
+                p.GEOM_MESH,
+                vertices=verts,
+                physicsClientId=client,
+            )
+            FreeCAD.Console.PrintMessage(
+                f"BulletPhysics: convex hull ({len(verts)} verts, "
+                f"res={mesh_resolution} mm) for custom shape\n"
+            )
         return col, min(half_extents)
 
     except Exception as exc:
