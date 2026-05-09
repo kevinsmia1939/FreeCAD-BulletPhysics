@@ -38,10 +38,19 @@ class SimulationPanel:
         self._world_label.setWordWrap(True)
         sim_layout.addWidget(self._world_label)
 
+        sim_btn_row = QtWidgets.QHBoxLayout()
         self.sim_btn = QtWidgets.QPushButton("Simulate")
         self.sim_btn.setIcon(
             self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPlay))
-        sim_layout.addWidget(self.sim_btn)
+        sim_btn_row.addWidget(self.sim_btn)
+
+        self.stop_sim_btn = QtWidgets.QPushButton("Stop")
+        self.stop_sim_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaStop))
+        self.stop_sim_btn.setToolTip("Stop the running simulation and keep frames recorded so far.")
+        self.stop_sim_btn.setEnabled(False)
+        sim_btn_row.addWidget(self.stop_sim_btn)
+        sim_layout.addLayout(sim_btn_row)
 
         self.progress = QtWidgets.QProgressBar()
         self.progress.setRange(0, 100)
@@ -141,6 +150,7 @@ class SimulationPanel:
 
         # ── Wiring ────────────────────────────────────────────────────────────
         self.sim_btn.clicked.connect(self._run_simulation)
+        self.stop_sim_btn.clicked.connect(self._stop_simulation)
         self.reset_btn.clicked.connect(self._reset)
         self.delete_cache_btn.clicked.connect(self._delete_cache)
         self.bake_btn.clicked.connect(self._bake_frame)
@@ -186,16 +196,21 @@ class SimulationPanel:
         from simulation.BulletSimulation import run_simulation
         self._stop()
         self._refresh_world_label()
+        self._sim_stop_requested = False
         self.sim_btn.setEnabled(False)
+        self.stop_sim_btn.setEnabled(True)
         self.progress.setValue(0)
         self.sim_status.setText("Running…")
 
         def cb(done, total):
             self.progress.setValue(int(done * 100 / total))
             QtWidgets.QApplication.processEvents()
+            if self._sim_stop_requested:
+                return False  # signal run_simulation to break early
 
         result = run_simulation(callback=cb)
         self.sim_btn.setEnabled(True)
+        self.stop_sim_btn.setEnabled(False)
 
         if not result:
             self.sim_status.setText("Simulation failed — see Report View.")
@@ -207,8 +222,14 @@ class SimulationPanel:
         self._populate_playback(apply_first_frame=True)
         n = len(self.frames) - 1
         total_secs = n * self.time_step
+        stopped = " (stopped early)" if self._sim_stop_requested else ""
         self.sim_status.setText(
-            f"Done — {n} steps  ({total_secs:.2f} s simulated)")
+            f"Done — {n} frames  ({total_secs:.2f} s simulated){stopped}")
+
+    def _stop_simulation(self):
+        self._sim_stop_requested = True
+        self.stop_sim_btn.setEnabled(False)
+        self.sim_status.setText("Stopping…")
 
     def _try_load_cache(self):
         from simulation.BulletSimulation import load_simulation_cache

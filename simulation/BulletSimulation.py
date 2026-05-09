@@ -373,7 +373,10 @@ def run_simulation(callback=None):
             frames.append(frame)
 
             if callback:
-                callback(step + 1, steps)
+                if callback(step + 1, steps) is False:
+                    FreeCAD.Console.PrintMessage(
+                        f"BulletPhysics: simulation stopped after {step + 1} frames.\n")
+                    break
 
         return frames, time_step
 
