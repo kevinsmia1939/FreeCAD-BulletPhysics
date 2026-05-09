@@ -102,20 +102,20 @@ def _detect_freecad_shape_type(fc_shape):
 
 def _local_half_extents(fc_shape, orig_pl):
     """
-    Return [hx, hy, hz] in mm — the collision shape half-extents in the body's
-    own local frame.  Computed by inverse-rotating the world-space vertices so
-    the AABB of a rotated shape is not inflated.
+    Return [hx, hy, hz] in mm — collision half-extents in the body's local frame.
+
+    Uses transformGeometry (not vertex iteration) so that analytic surfaces with
+    very few BRep vertices give correct results:
+      - Sphere: only 2 pole vertices → vertex scan gives [0, 0, R]; AABB of the
+        un-rotated geometry gives [R, R, R]. ✓
+      - Cylinder: only 2 seam vertices → similar issue fixed the same way. ✓
+      - Box / mesh: vertex scan would also work, but this path is simpler.
     """
-    inv_rot = orig_pl.Rotation.inverted()
-    local_pts = [inv_rot.multVec(v.Point) for v in fc_shape.Vertexes]
-    if local_pts:
-        lxs = [lp.x for lp in local_pts]
-        lys = [lp.y for lp in local_pts]
-        lzs = [lp.z for lp in local_pts]
-        return [(max(lxs) - min(lxs)) / 2.0,
-                (max(lys) - min(lys)) / 2.0,
-                (max(lzs) - min(lzs)) / 2.0]
-    bb = fc_shape.BoundBox
+    mat = FreeCAD.Placement(FreeCAD.Vector(), orig_pl.Rotation.inverted()).toMatrix()
+    try:
+        bb = fc_shape.transformGeometry(mat).BoundBox
+    except Exception:
+        bb = fc_shape.BoundBox
     return [bb.XLength / 2.0, bb.YLength / 2.0, bb.ZLength / 2.0]
 
 
