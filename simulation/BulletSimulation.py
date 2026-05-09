@@ -166,7 +166,12 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
     hx, hy, hz = half_extents
 
     if shape_type == "sphere":
-        radius = (hx + hy + hz) / 3.0
+        try:
+            # Read the analytic radius directly — BoundBox can over-estimate
+            # due to OCCT approximation of curved surfaces.
+            radius = fc_shape.Faces[0].Surface.Radius * MM_TO_M
+        except Exception:
+            radius = (hx + hy + hz) / 3.0
         col = p.createCollisionShape(
             p.GEOM_SPHERE, radius=radius, physicsClientId=client)
         return col, radius
@@ -597,7 +602,10 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl, forced_type=None):
     shape_type = forced_type or _detect_freecad_shape_type(fc_shape)
 
     if shape_type == "sphere":
-        radius = (half[0] + half[1] + half[2]) / 3.0
+        try:
+            radius = fc_shape.Faces[0].Surface.Radius
+        except Exception:
+            radius = (half[0] + half[1] + half[2]) / 3.0
         wf = Part.makeSphere(radius)
         # Part.makeSphere is already centred at origin — no transform needed
 

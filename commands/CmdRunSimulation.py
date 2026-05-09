@@ -61,12 +61,20 @@ class SimulationPanel:
         self.sim_status = QtWidgets.QLabel("Ready.")
         sim_layout.addWidget(self.sim_status)
 
+        collision_row = QtWidgets.QHBoxLayout()
         self.collision_chk = QtWidgets.QCheckBox("Show Collision Shapes")
         self.collision_chk.setToolTip(
             "Display green wireframe outlines of each rigid body's collision\n"
             "envelope.  The wireframes animate in sync with playback.\n"
             "Available before running the simulation.")
-        sim_layout.addWidget(self.collision_chk)
+        collision_row.addWidget(self.collision_chk)
+        self.refresh_collision_btn = QtWidgets.QPushButton("Refresh")
+        self.refresh_collision_btn.setToolTip(
+            "Rebuild collision wireframes from the current solid positions.\n"
+            "Use this after moving or rotating a solid.")
+        self.refresh_collision_btn.setEnabled(False)
+        collision_row.addWidget(self.refresh_collision_btn)
+        sim_layout.addLayout(collision_row)
 
         root.addWidget(sim_group)
 
@@ -172,6 +180,7 @@ class SimulationPanel:
         self.speed_combo.currentIndexChanged.connect(self._update_timer_interval)
 
         self.collision_chk.stateChanged.connect(self._on_collision_chk)
+        self.refresh_collision_btn.clicked.connect(self._rebuild_wireframes)
 
         self._refresh_world_label()
         from simulation.BulletSimulation import cleanup_stale_wireframes
@@ -442,6 +451,7 @@ class SimulationPanel:
     def _on_collision_chk(self, state):
         if state:
             self._rebuild_wireframes()
+            self.refresh_collision_btn.setEnabled(True)
         else:
             self._hide_wireframes()
 
@@ -464,6 +474,7 @@ class SimulationPanel:
         if self._wireframe_infos:
             remove_collision_wireframes(self._wireframe_infos)
             self._wireframe_infos = []
+        self.refresh_collision_btn.setEnabled(False)
 
     def reject(self):
         self._stop()
