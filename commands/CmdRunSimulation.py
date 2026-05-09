@@ -24,6 +24,8 @@ class SimulationPanel:
         self.frames = []
         self.time_step = 1.0 / 60.0
         self._playing = False
+        self._wireframe_infos = []
+        self._sim_stop_requested = False
 
         self.form = QtWidgets.QWidget()
         self.form.setWindowTitle("Bullet Physics")
@@ -58,6 +60,13 @@ class SimulationPanel:
 
         self.sim_status = QtWidgets.QLabel("Ready.")
         sim_layout.addWidget(self.sim_status)
+
+        self.collision_chk = QtWidgets.QCheckBox("Show Collision Shapes")
+        self.collision_chk.setToolTip(
+            "Display green wireframe outlines of each rigid body's collision\n"
+            "envelope.  The wireframes animate in sync with playback.\n"
+            "Available before running the simulation.")
+        sim_layout.addWidget(self.collision_chk)
 
         root.addWidget(sim_group)
 
@@ -162,7 +171,11 @@ class SimulationPanel:
         self.btn_end.clicked.connect(self._go_end)
         self.speed_combo.currentIndexChanged.connect(self._update_timer_interval)
 
+        self.collision_chk.stateChanged.connect(self._on_collision_chk)
+
         self._refresh_world_label()
+        from simulation.BulletSimulation import cleanup_stale_wireframes
+        cleanup_stale_wireframes()
         self._try_load_cache()
 
     # ── World info ──────────────────────────────────────────────────────────
@@ -220,6 +233,8 @@ class SimulationPanel:
         from simulation.BulletSimulation import save_simulation_cache
         save_simulation_cache(self.frames, self.time_step)
         self._populate_playback(apply_first_frame=True)
+        if self.collision_chk.isChecked():
+            self._rebuild_wireframes()
         n = len(self.frames) - 1
         total_secs = n * self.time_step
         stopped = " (stopped early)" if self._sim_stop_requested else ""
@@ -280,8 +295,12 @@ class SimulationPanel:
 
     def _on_slider(self, value):
         if self.frames:
-            from simulation.BulletSimulation import apply_frame
-            apply_frame(self.frames[value])
+            from simulation.BulletSimulation import apply_frame, update_collision_wireframes
+            frame = self.frames[value]
+            apply_frame(frame)
+            if self._wireframe_infos:
+                update_collision_wireframes(self._wireframe_infos, frame)
+                FreeCADGui.updateGui()
             self._update_frame_label(value)
 
     def _go_start(self):
@@ -345,6 +364,14 @@ class SimulationPanel:
             self.slider.setValue(0)
             self.slider.blockSignals(False)
             self._update_frame_label(0)
+        # Wireframes: rebuild from original placements (frame 0)
+        if self._wireframe_infos:
+            if self.frames:
+                from simulation.BulletSimulation import update_collision_wireframes
+                update_collision_wireframes(self._wireframe_infos, self.frames[0])
+            else:
+                self._rebuild_wireframes()
+            FreeCADGui.updateGui()
 
     def _delete_cache(self):
         from simulation.BulletSimulation import delete_simulation_cache
@@ -403,13 +430,44 @@ class SimulationPanel:
 
         FreeCADGui.updateGui()
         delete_simulation_cache()
+        self._hide_wireframes()
+        self.collision_chk.setChecked(False)
         t = frame_idx * self.time_step
         self._clear_playback(
             f"Frame {frame_idx} ({t:.3f} s) baked as new origin. "
             f"Re-run simulation to continue from this pose.")
 
+    # ── Collision wireframes ─────────────────────────────────────────────────
+
+    def _on_collision_chk(self, state):
+        if state:
+            self._rebuild_wireframes()
+        else:
+            self._hide_wireframes()
+
+    def _rebuild_wireframes(self):
+        """(Re)create wireframes from the current OriginalObject placements."""
+        from simulation.BulletSimulation import (
+            create_collision_wireframes, update_collision_wireframes,
+            remove_collision_wireframes)
+        if self._wireframe_infos:
+            remove_collision_wireframes(self._wireframe_infos)
+        self._wireframe_infos = create_collision_wireframes()
+        # If a frame is already loaded, advance wireframes to the current frame
+        if self.frames and self._wireframe_infos:
+            update_collision_wireframes(
+                self._wireframe_infos, self.frames[self.slider.value()])
+            FreeCADGui.updateGui()
+
+    def _hide_wireframes(self):
+        from simulation.BulletSimulation import remove_collision_wireframes
+        if self._wireframe_infos:
+            remove_collision_wireframes(self._wireframe_infos)
+            self._wireframe_infos = []
+
     def reject(self):
         self._stop()
+        self._hide_wireframes()
         FreeCADGui.Control.closeDialog()
 
 

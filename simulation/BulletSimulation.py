@@ -100,6 +100,25 @@ def _detect_freecad_shape_type(fc_shape):
     return "mesh"
 
 
+def _local_half_extents(fc_shape, orig_pl):
+    """
+    Return [hx, hy, hz] in mm — the collision shape half-extents in the body's
+    own local frame.  Computed by inverse-rotating the world-space vertices so
+    the AABB of a rotated shape is not inflated.
+    """
+    inv_rot = orig_pl.Rotation.inverted()
+    local_pts = [inv_rot.multVec(v.Point) for v in fc_shape.Vertexes]
+    if local_pts:
+        lxs = [lp.x for lp in local_pts]
+        lys = [lp.y for lp in local_pts]
+        lzs = [lp.z for lp in local_pts]
+        return [(max(lxs) - min(lxs)) / 2.0,
+                (max(lys) - min(lys)) / 2.0,
+                (max(lzs) - min(lzs)) / 2.0]
+    bb = fc_shape.BoundBox
+    return [bb.XLength / 2.0, bb.YLength / 2.0, bb.ZLength / 2.0]
+
+
 def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
     """
     Tessellate fc_shape and return (vertices, flat_indices) in body-local space.
@@ -323,24 +342,9 @@ def run_simulation(callback=None):
             world_center = FreeCAD.Vector(
                 bb.Center.x, bb.Center.y, bb.Center.z)
 
-            # Half-extents in the body's LOCAL frame.
-            # shape.BoundBox gives the world-space AABB, which is inflated when
-            # the shape is rotated.  We inverse-rotate the vertices to get the
-            # correct local-frame dimensions so the collision shape matches the
-            # actual geometry after pybullet applies baseOrientation.
-            inv_rot = orig_pl.Rotation.inverted()
-            local_pts = [inv_rot.multVec(v.Point) for v in shape.Vertexes]
-            if local_pts:
-                lxs = [lp.x for lp in local_pts]
-                lys = [lp.y for lp in local_pts]
-                lzs = [lp.z for lp in local_pts]
-                half = [(max(lxs) - min(lxs)) * MM_TO_M / 2.0,
-                        (max(lys) - min(lys)) * MM_TO_M / 2.0,
-                        (max(lzs) - min(lzs)) * MM_TO_M / 2.0]
-            else:
-                half = [bb.XLength * MM_TO_M / 2.0,
-                        bb.YLength * MM_TO_M / 2.0,
-                        bb.ZLength * MM_TO_M / 2.0]
+            # Half-extents in body-local frame (mm → m).
+            half_mm = _local_half_extents(shape, orig_pl)
+            half = [h * MM_TO_M for h in half_mm]
             center_m = [world_center.x * MM_TO_M,
                         world_center.y * MM_TO_M,
                         world_center.z * MM_TO_M]
@@ -557,6 +561,135 @@ def delete_simulation_cache(doc=None):
             f"BulletPhysics: simulation cache deleted — {path}\n")
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Collision wireframe visualisation
+# ---------------------------------------------------------------------------
+
+def _build_collision_wireframe_shape(fc_shape, orig_pl):
+    """
+    Return (part_shape, local_offset_mm) where part_shape is a Part solid
+    representing the collision envelope, centered at its local origin (so that
+    setting Part::Feature.Placement = Placement(collision_center, rot) places
+    it correctly in the 3D view).
+
+    local_offset_mm is the FreeCAD-unit (mm) vector from orig_pl.Base to the
+    collision centre, expressed in the body's local frame.
+    """
+    import Part
+
+    bb = fc_shape.BoundBox
+    world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+    inv_rot = orig_pl.Rotation.inverted()
+    local_offset = inv_rot.multVec(world_center - orig_pl.Base)
+
+    half = _local_half_extents(fc_shape, orig_pl)   # [hx, hy, hz] in mm
+    shape_type = _detect_freecad_shape_type(fc_shape)
+
+    if shape_type == "sphere":
+        radius = (half[0] + half[1] + half[2]) / 3.0
+        wf = Part.makeSphere(radius)
+        # Part.makeSphere is already centred at origin — no transform needed
+
+    elif shape_type == "cylinder":
+        half_sorted = sorted(half)
+        radius = (half_sorted[0] + half_sorted[1]) / 2.0
+        height = half_sorted[2] * 2.0
+        wf = Part.makeCylinder(radius, height)
+        mat = FreeCAD.Matrix()
+        mat.move(FreeCAD.Vector(0.0, 0.0, -height / 2.0))
+        wf = wf.transformGeometry(mat)
+
+    else:   # box or mesh — use an OBB-aligned box
+        hx, hy, hz = half
+        wf = Part.makeBox(hx * 2.0, hy * 2.0, hz * 2.0)
+        mat = FreeCAD.Matrix()
+        mat.move(FreeCAD.Vector(-hx, -hy, -hz))
+        wf = wf.transformGeometry(mat)
+
+    return wf, local_offset
+
+
+def create_collision_wireframes(doc=None):
+    """
+    Create a green wireframe Part::Feature for every rigid body's collision
+    envelope.  Works before the simulation is run (reads OriginalObject placements).
+
+    Returns a list of (obj, link_name, local_offset_mm) tuples.
+    local_offset_mm is the body-local vector (mm) from the placement origin to
+    the collision centre — needed to reposition wireframes during playback.
+    """
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    result = []
+
+    for rb in collect_rigid_bodies(doc):
+        original  = rb.OriginalObject
+        orig_pl   = original.Placement
+        fc_shape  = original.Shape
+
+        wf_shape, local_offset = _build_collision_wireframe_shape(fc_shape, orig_pl)
+
+        obj = doc.addObject("Part::Feature", f"_BtWF_{rb.Label}")
+        obj.Label  = f"Collision: {rb.Label}"
+        obj.Shape  = wf_shape
+
+        col_center = orig_pl.Base + orig_pl.Rotation.multVec(local_offset)
+        obj.Placement = FreeCAD.Placement(col_center, orig_pl.Rotation)
+
+        if FreeCAD.GuiUp:
+            import FreeCADGui
+            vobj = obj.ViewObject
+            vobj.DisplayMode = "Wireframe"
+            vobj.LineColor   = (0.0, 1.0, 0.0)
+            vobj.LineWidth   = 2.0
+            vobj.Selectable  = False
+
+        result.append((obj, rb.BodyLink.Name, local_offset))
+
+    doc.recompute()
+    return result
+
+
+def update_collision_wireframes(wireframe_infos, frame):
+    """
+    Reposition each wireframe to match the given simulation frame.
+    Passive bodies are not in *frame*, so their wireframes stay in place
+    (correct, since passive bodies do not move).
+    """
+    for (obj, link_name, local_offset) in wireframe_infos:
+        if link_name not in frame:
+            continue
+        link_pl    = frame[link_name]
+        col_center = link_pl.Base + link_pl.Rotation.multVec(local_offset)
+        obj.Placement = FreeCAD.Placement(col_center, link_pl.Rotation)
+
+
+def remove_collision_wireframes(wireframe_infos, doc=None):
+    """Delete all wireframe objects from the document."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    for (obj, _, _) in wireframe_infos:
+        try:
+            doc.removeObject(obj.Name)
+        except Exception:
+            pass
+    if wireframe_infos:
+        doc.recompute()
+
+
+def cleanup_stale_wireframes(doc=None):
+    """Remove any leftover _BtWF_ objects (e.g. from a previous crash)."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    if doc is None:
+        return
+    stale = [o for o in doc.Objects if o.Name.startswith("_BtWF_")]
+    for o in stale:
+        doc.removeObject(o.Name)
+    if stale:
+        doc.recompute()
 
 
 def _show_install_error():
