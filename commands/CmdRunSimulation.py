@@ -121,6 +121,17 @@ class SimulationPanel:
             "Delete the saved simulation cache file from disk.")
         play_layout.addWidget(self.delete_cache_btn)
 
+        self.bake_btn = QtWidgets.QPushButton("Bake Frame as New Origin")
+        self.bake_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton))
+        self.bake_btn.setToolTip(
+            "Copy the current frame's positions and orientations to the original\n"
+            "objects, making this the new starting point for future simulations\n"
+            "and CAD work.\n\n"
+            "Fully undoable with Ctrl+Z. Clears the simulation cache.")
+        self.bake_btn.setEnabled(False)
+        play_layout.addWidget(self.bake_btn)
+
         root.addWidget(play_group)
         root.addStretch()
 
@@ -132,6 +143,7 @@ class SimulationPanel:
         self.sim_btn.clicked.connect(self._run_simulation)
         self.reset_btn.clicked.connect(self._reset)
         self.delete_cache_btn.clicked.connect(self._delete_cache)
+        self.bake_btn.clicked.connect(self._bake_frame)
         self.slider.valueChanged.connect(self._on_slider)
         self.btn_start.clicked.connect(self._go_start)
         self.btn_back.clicked.connect(self._step_back)
@@ -222,6 +234,7 @@ class SimulationPanel:
         for btn in (self.btn_start, self.btn_back, self.btn_play,
                     self.btn_forward, self.btn_end):
             btn.setEnabled(True)
+        self.bake_btn.setEnabled(True)
         self._update_frame_label(0)
 
     # ── Playback helpers ────────────────────────────────────────────────────
@@ -316,18 +329,63 @@ class SimulationPanel:
         from simulation.BulletSimulation import delete_simulation_cache
         deleted = delete_simulation_cache()
         if deleted:
-            self.frames = []
-            self.time_step = 1.0 / 60.0
-            self.slider.setRange(0, 0)
-            self.slider.setEnabled(False)
-            self.speed_combo.setEnabled(False)
-            for btn in (self.btn_start, self.btn_back, self.btn_play,
-                        self.btn_forward, self.btn_end):
-                btn.setEnabled(False)
-            self._update_frame_label(0)
-            self.sim_status.setText("Cache deleted.")
+            self._clear_playback("Cache deleted.")
         else:
             self.sim_status.setText("No cache file found.")
+
+    def _clear_playback(self, status_msg=""):
+        self._stop()
+        self.frames = []
+        self.time_step = 1.0 / 60.0
+        self.slider.setRange(0, 0)
+        self.slider.setEnabled(False)
+        self.speed_combo.setEnabled(False)
+        self.bake_btn.setEnabled(False)
+        for btn in (self.btn_start, self.btn_back, self.btn_play,
+                    self.btn_forward, self.btn_end):
+            btn.setEnabled(False)
+        self._update_frame_label(0)
+        if status_msg:
+            self.sim_status.setText(status_msg)
+
+    def _bake_frame(self):
+        """
+        Copy the current frame's placements to the OriginalObjects so this
+        pose becomes the new starting point for CAD work and future simulations.
+        Recorded inside a FreeCAD transaction → fully undoable with Ctrl+Z.
+        """
+        if not self.frames:
+            return
+        self._stop()
+        frame_idx = self.slider.value()
+        frame     = self.frames[frame_idx]
+
+        from simulation.BulletSimulation import (
+            collect_rigid_bodies, delete_simulation_cache)
+
+        doc = FreeCAD.ActiveDocument
+        doc.openTransaction(f"Bake simulation frame {frame_idx} as new origin")
+        try:
+            for rb in collect_rigid_bodies():
+                if rb.BodyType == "Passive":
+                    continue
+                link_name = rb.BodyLink.Name
+                new_pl = frame.get(link_name, rb.BodyLink.Placement)
+                rb.OriginalObject.Placement = new_pl.copy()
+                rb.BodyLink.Placement       = new_pl.copy()
+            doc.commitTransaction()
+        except Exception as exc:
+            doc.abortTransaction()
+            FreeCAD.Console.PrintError(
+                f"BulletPhysics: bake failed — {exc}\n")
+            return
+
+        FreeCADGui.updateGui()
+        delete_simulation_cache()
+        t = frame_idx * self.time_step
+        self._clear_playback(
+            f"Frame {frame_idx} ({t:.3f} s) baked as new origin. "
+            f"Re-run simulation to continue from this pose.")
 
     def reject(self):
         self._stop()
