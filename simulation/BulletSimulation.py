@@ -318,14 +318,29 @@ def run_simulation(callback=None):
             shape = original.Shape
             bb = shape.BoundBox
 
-            # Half-extents from the original shape geometry
-            half = [bb.XLength * MM_TO_M / 2.0,
-                    bb.YLength * MM_TO_M / 2.0,
-                    bb.ZLength * MM_TO_M / 2.0]
-
-            # World-space bbox centre (original never moves, so this is stable)
+            # World-space bbox centre (correct for any rotation — AABB centre
+            # equals the geometric centre for convex symmetric shapes like boxes).
             world_center = FreeCAD.Vector(
                 bb.Center.x, bb.Center.y, bb.Center.z)
+
+            # Half-extents in the body's LOCAL frame.
+            # shape.BoundBox gives the world-space AABB, which is inflated when
+            # the shape is rotated.  We inverse-rotate the vertices to get the
+            # correct local-frame dimensions so the collision shape matches the
+            # actual geometry after pybullet applies baseOrientation.
+            inv_rot = orig_pl.Rotation.inverted()
+            local_pts = [inv_rot.multVec(v.Point) for v in shape.Vertexes]
+            if local_pts:
+                lxs = [lp.x for lp in local_pts]
+                lys = [lp.y for lp in local_pts]
+                lzs = [lp.z for lp in local_pts]
+                half = [(max(lxs) - min(lxs)) * MM_TO_M / 2.0,
+                        (max(lys) - min(lys)) * MM_TO_M / 2.0,
+                        (max(lzs) - min(lzs)) * MM_TO_M / 2.0]
+            else:
+                half = [bb.XLength * MM_TO_M / 2.0,
+                        bb.YLength * MM_TO_M / 2.0,
+                        bb.ZLength * MM_TO_M / 2.0]
             center_m = [world_center.x * MM_TO_M,
                         world_center.y * MM_TO_M,
                         world_center.z * MM_TO_M]
