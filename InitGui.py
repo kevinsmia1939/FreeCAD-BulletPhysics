@@ -5,9 +5,9 @@ class BulletPhysicsWorkbench(Workbench):
     def __init__(self):
         import os
         import BulletUtils
-        self.__class__.Icon = os.path.join(
-            BulletUtils.MOD_PATH, "icons", "BulletPhysics.svg"
-        )
+        icons_path = os.path.join(BulletUtils.MOD_PATH, "icons")
+        self.__class__.Icon = os.path.join(icons_path, "BulletPhysics.svg")
+        FreeCADGui.addIconPath(icons_path)
         from preferences.BulletPreferences import BulletPreferencesPage
         FreeCADGui.addPreferencePage(BulletPreferencesPage, "Bullet Physics")
 
