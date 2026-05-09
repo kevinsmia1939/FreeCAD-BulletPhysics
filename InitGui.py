@@ -8,13 +8,13 @@ class BulletPhysicsWorkbench(Workbench):
         self.__class__.Icon = os.path.join(
             BulletUtils.MOD_PATH, "icons", "BulletPhysics.svg"
         )
+        from preferences.BulletPreferences import BulletPreferencesPage
+        FreeCADGui.addPreferencePage(BulletPreferencesPage, "Bullet Physics")
 
     def Initialize(self):
         import commands.CmdCreateContainer
         import commands.CmdAddRigidBody
         import commands.CmdRunSimulation
-        from preferences.BulletPreferences import BulletPreferencesPage
-        FreeCADGui.addPreferencePage(BulletPreferencesPage, "Bullet Physics")
 
         tool_list = [
             "BulletPhysics_CreateContainer",
