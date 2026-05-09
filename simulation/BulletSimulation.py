@@ -645,27 +645,13 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl, forced_type=None):
         mat.move(FreeCAD.Vector(-hx, -hy, -hz))
         wf = wf.transformGeometry(mat)
 
-    else:   # mesh — show the actual FreeCAD solid in body-local frame
-        # Goal: p_local = R⁻¹·(p_world − world_center), so that
-        # Placement(world_center, R) recovers p_world = world_center + R·p_local.
-        #
-        # Centering at ub.Center (AABB centre of the un-rotated shape) is wrong
-        # for non-symmetric meshes because AABB centres don't commute with
-        # rotation: ub.Center ≠ R⁻¹·world_center in general.
-        try:
-            inv_rot_mat = FreeCAD.Placement(
-                FreeCAD.Vector(), orig_pl.Rotation.inverted()).toMatrix()
-            unrotated = fc_shape.transformGeometry(inv_rot_mat)
-            target = orig_pl.Rotation.inverted().multVec(world_center)
-            center_mat = FreeCAD.Matrix()
-            center_mat.move(FreeCAD.Vector(-target.x, -target.y, -target.z))
-            wf = unrotated.transformGeometry(center_mat)
-        except Exception:
-            hx, hy, hz = half
-            wf = Part.makeBox(hx * 2.0, hy * 2.0, hz * 2.0)
-            mat = FreeCAD.Matrix()
-            mat.move(FreeCAD.Vector(-hx, -hy, -hz))
-            wf = wf.transformGeometry(mat)
+    else:   # mesh — return world-space copy; caller uses delta placement
+        # transformGeometry is unreliable for complex PartDesign BRep solids
+        # (may silently mis-center or raise for non-analytic geometry).
+        # Instead, keep the shape in its original world-space coordinates and
+        # let create/update_collision_wireframes drive position via delta
+        # placement: obj.Placement = link_pl * orig_pl^{-1}.
+        return fc_shape.copy(), orig_pl   # orig_pl signals "delta placement" mode
 
     return wf, local_offset
 
@@ -690,15 +676,21 @@ def create_collision_wireframes(doc=None):
 
         override = getattr(rb, "ShapeOverride", "Auto")
         forced_type = None if override == "Auto" else override
-        wf_shape, local_offset = _build_collision_wireframe_shape(
+        wf_shape, extra = _build_collision_wireframe_shape(
             fc_shape, orig_pl, forced_type=forced_type)
 
         obj = doc.addObject("Part::Feature", f"_BtWF_{rb.Label}")
         obj.Label  = f"Collision: {rb.Label}"
         obj.Shape  = wf_shape
 
-        col_center = orig_pl.Base + orig_pl.Rotation.multVec(local_offset)
-        obj.Placement = FreeCAD.Placement(col_center, orig_pl.Rotation)
+        if isinstance(extra, FreeCAD.Placement):
+            # Mesh / delta-placement mode: shape is already in world space.
+            # Leave Placement at identity; animation uses link_pl * orig_pl^{-1}.
+            obj.Placement = FreeCAD.Placement()
+        else:
+            local_offset = extra
+            col_center = orig_pl.Base + orig_pl.Rotation.multVec(local_offset)
+            obj.Placement = FreeCAD.Placement(col_center, orig_pl.Rotation)
 
         if FreeCAD.GuiUp:
             import FreeCADGui
@@ -708,7 +700,7 @@ def create_collision_wireframes(doc=None):
             vobj.LineWidth   = 2.0
             vobj.Selectable  = False
 
-        result.append((obj, rb.BodyLink.Name, local_offset))
+        result.append((obj, rb.BodyLink.Name, extra))
 
     doc.recompute()
     return result
@@ -720,12 +712,17 @@ def update_collision_wireframes(wireframe_infos, frame):
     Passive bodies are not in *frame*, so their wireframes stay in place
     (correct, since passive bodies do not move).
     """
-    for (obj, link_name, local_offset) in wireframe_infos:
+    for (obj, link_name, extra) in wireframe_infos:
         if link_name not in frame:
             continue
-        link_pl    = frame[link_name]
-        col_center = link_pl.Base + link_pl.Rotation.multVec(local_offset)
-        obj.Placement = FreeCAD.Placement(col_center, link_pl.Rotation)
+        link_pl = frame[link_name]
+        if isinstance(extra, FreeCAD.Placement):
+            # Delta placement: transform world-space shape by (link_pl * orig_pl^{-1})
+            obj.Placement = link_pl.multiply(extra.inverse())
+        else:
+            local_offset = extra
+            col_center = link_pl.Base + link_pl.Rotation.multVec(local_offset)
+            obj.Placement = FreeCAD.Placement(col_center, link_pl.Rotation)
 
 
 def remove_collision_wireframes(wireframe_infos, doc=None):
