@@ -601,12 +601,32 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl):
         mat.move(FreeCAD.Vector(0.0, 0.0, -height / 2.0))
         wf = wf.transformGeometry(mat)
 
-    else:   # box or mesh — use an OBB-aligned box
+    elif shape_type == "box":
         hx, hy, hz = half
         wf = Part.makeBox(hx * 2.0, hy * 2.0, hz * 2.0)
         mat = FreeCAD.Matrix()
         mat.move(FreeCAD.Vector(-hx, -hy, -hz))
         wf = wf.transformGeometry(mat)
+
+    else:   # mesh — show the actual FreeCAD solid in body-local frame
+        # Un-rotate the world-space shape into the body's local frame, then
+        # translate so its centre lands at the local origin.  The feature
+        # Placement (collision_centre, body_rotation) then positions it
+        # correctly in the 3D view and animates correctly during playback.
+        try:
+            inv_rot_mat = FreeCAD.Placement(
+                FreeCAD.Vector(), orig_pl.Rotation.inverted()).toMatrix()
+            unrotated = fc_shape.transformGeometry(inv_rot_mat)
+            ub = unrotated.BoundBox
+            center_mat = FreeCAD.Matrix()
+            center_mat.move(FreeCAD.Vector(-ub.Center.x, -ub.Center.y, -ub.Center.z))
+            wf = unrotated.transformGeometry(center_mat)
+        except Exception:
+            hx, hy, hz = half
+            wf = Part.makeBox(hx * 2.0, hy * 2.0, hz * 2.0)
+            mat = FreeCAD.Matrix()
+            mat.move(FreeCAD.Vector(-hx, -hy, -hz))
+            wf = wf.transformGeometry(mat)
 
     return wf, local_offset
 
