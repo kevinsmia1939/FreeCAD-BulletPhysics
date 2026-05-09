@@ -4,7 +4,7 @@
   <description>Bullet Physics rigid-body simulation workbench for FreeCAD.</description>
   <version>0.1.0</version>
   <date>2026-05-08</date>
-  <maintainer email="kevinsmia1939@gmail.com">Kavin Teenakul</maintainer>
+  <maintainer email="andythe_great@protonmail.com">Kavin Teenakul</maintainer>
   <license>GPL-3.0-or-later</license>
   <url type="repository">https://github.com/kevinsmia1939/FreeCAD-BulletPhysics</url>
   <content>
