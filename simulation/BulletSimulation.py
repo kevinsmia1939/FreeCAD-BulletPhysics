@@ -177,13 +177,23 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         return col, radius
 
     if shape_type == "cylinder":
-        half_sorted = sorted([hx, hy, hz])
-        radius     = (half_sorted[0] + half_sorted[1]) / 2.0
-        halfHeight = half_sorted[2]
+        try:
+            cyl_face  = next((f for f in fc_shape.Faces
+                              if "Cylinder" in type(f.Surface).__name__), None)
+            seam_edge = next((e for e in fc_shape.Edges
+                              if "Line" in type(e.Curve).__name__), None)
+            if cyl_face is None or seam_edge is None:
+                raise ValueError("cylinder geometry not found")
+            radius = cyl_face.Surface.Radius * MM_TO_M
+            height = seam_edge.Length * MM_TO_M
+        except Exception:
+            half_sorted = sorted([hx, hy, hz])
+            radius = (half_sorted[0] + half_sorted[1]) / 2.0
+            height = half_sorted[2] * 2.0
         col = p.createCollisionShape(
             p.GEOM_CYLINDER,
             radius=radius,
-            height=halfHeight * 2.0,
+            height=height,
             physicsClientId=client,
         )
         return col, radius
@@ -610,9 +620,19 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl, forced_type=None):
         # Part.makeSphere is already centred at origin — no transform needed
 
     elif shape_type == "cylinder":
-        half_sorted = sorted(half)
-        radius = (half_sorted[0] + half_sorted[1]) / 2.0
-        height = half_sorted[2] * 2.0
+        try:
+            cyl_face  = next((f for f in fc_shape.Faces
+                              if "Cylinder" in type(f.Surface).__name__), None)
+            seam_edge = next((e for e in fc_shape.Edges
+                              if "Line" in type(e.Curve).__name__), None)
+            if cyl_face is None or seam_edge is None:
+                raise ValueError("cylinder geometry not found")
+            radius = cyl_face.Surface.Radius
+            height = seam_edge.Length
+        except Exception:
+            half_sorted = sorted(half)
+            radius = (half_sorted[0] + half_sorted[1]) / 2.0
+            height = half_sorted[2] * 2.0
         wf = Part.makeCylinder(radius, height)
         mat = FreeCAD.Matrix()
         mat.move(FreeCAD.Vector(0.0, 0.0, -height / 2.0))
@@ -626,17 +646,19 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl, forced_type=None):
         wf = wf.transformGeometry(mat)
 
     else:   # mesh — show the actual FreeCAD solid in body-local frame
-        # Un-rotate the world-space shape into the body's local frame, then
-        # translate so its centre lands at the local origin.  The feature
-        # Placement (collision_centre, body_rotation) then positions it
-        # correctly in the 3D view and animates correctly during playback.
+        # Goal: p_local = R⁻¹·(p_world − world_center), so that
+        # Placement(world_center, R) recovers p_world = world_center + R·p_local.
+        #
+        # Centering at ub.Center (AABB centre of the un-rotated shape) is wrong
+        # for non-symmetric meshes because AABB centres don't commute with
+        # rotation: ub.Center ≠ R⁻¹·world_center in general.
         try:
             inv_rot_mat = FreeCAD.Placement(
                 FreeCAD.Vector(), orig_pl.Rotation.inverted()).toMatrix()
             unrotated = fc_shape.transformGeometry(inv_rot_mat)
-            ub = unrotated.BoundBox
+            target = orig_pl.Rotation.inverted().multVec(world_center)
             center_mat = FreeCAD.Matrix()
-            center_mat.move(FreeCAD.Vector(-ub.Center.x, -ub.Center.y, -ub.Center.z))
+            center_mat.move(FreeCAD.Vector(-target.x, -target.y, -target.z))
             wf = unrotated.transformGeometry(center_mat)
         except Exception:
             hx, hy, hz = half
