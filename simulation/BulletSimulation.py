@@ -232,6 +232,8 @@ def run_simulation(callback=None):
         solver_iters     = world.SolverIterations
         sub_steps        = max(1, getattr(world, "SubSteps", 4))
         mesh_resolution  = max(0.001, getattr(world, "MeshResolution", 1.0))
+        linear_damping   = max(0.0, min(1.0, getattr(world, "LinearDamping", 0.0)))
+        angular_damping  = max(0.0, min(1.0, getattr(world, "AngularDamping", 0.0)))
     else:
         gravity_mag      = 9.81
         gravity_dir      = FreeCAD.Vector(0, 0, -1)
@@ -240,6 +242,8 @@ def run_simulation(callback=None):
         solver_iters     = 10
         sub_steps        = 4
         mesh_resolution  = 1.0
+        linear_damping   = 0.0
+        angular_damping  = 0.0
 
     steps = max(1, round(end_time / time_step))
 
@@ -263,7 +267,8 @@ def run_simulation(callback=None):
         f"frame={time_step*1000:.3f} ms, "
         f"subSteps={sub_steps}, tick={bullet_tick*1000:.3f} ms, "
         f"gravity=({gx:.3f}, {gy:.3f}, {gz:.3f}) m/s², "
-        f"solverIterations={solver_iters}\n"
+        f"solverIterations={solver_iters}, "
+        f"linearDamping={linear_damping:.3f}, angularDamping={angular_damping:.3f}\n"
     )
 
     client = p.connect(p.DIRECT)
@@ -333,16 +338,15 @@ def run_simulation(callback=None):
                 physicsClientId=client,
             )
 
-            # Active bodies: enable CCD and prevent Bullet from sleeping them.
-            # Bullet can immediately deactivate a body created at rest (zero
-            # velocity) before gravity has had a chance to act, causing the body
-            # to appear frozen during freefall until a collision wakes it up.
+            # Active bodies: enable CCD, prevent sleep, apply air damping.
             # activationState=4 == DISABLE_DEACTIVATION in Bullet's enum.
             if mass > 0:
                 p.changeDynamics(
                     body_id, -1,
                     ccdSweptSphereRadius=characteristic_radius * 0.4,
                     activationState=4,
+                    linearDamping=linear_damping,
+                    angularDamping=angular_damping,
                     physicsClientId=client,
                 )
 

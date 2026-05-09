@@ -38,6 +38,18 @@ class BulletWorldFeature:
                         "Primitives (box, sphere, cylinder) are unaffected.")
         obj.MeshResolution = 1.0
 
+        obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
+                        "Air damping applied to linear (translational) velocity of active "
+                        "bodies each step. 0 = no damping, 1 = full stop. "
+                        "Simulates air/fluid drag on translation.")
+        obj.LinearDamping = 0.0
+
+        obj.addProperty("App::PropertyFloat", "AngularDamping", "Physics",
+                        "Air damping applied to angular (rotational) velocity of active "
+                        "bodies each step. 0 = no damping, 1 = full stop. "
+                        "Simulates air/fluid drag on rotation.")
+        obj.AngularDamping = 0.0
+
         obj.Proxy = self
 
     def _ensure_properties(self, obj):
@@ -62,6 +74,16 @@ class BulletWorldFeature:
                             "collision shapes. Smaller = finer mesh, more accurate but slower. "
                             "Primitives (box, sphere, cylinder) are unaffected.")
             obj.MeshResolution = 1.0
+        if not hasattr(obj, "LinearDamping"):
+            obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
+                            "Air damping applied to linear (translational) velocity of active "
+                            "bodies each step. 0 = no damping, 1 = full stop.")
+            obj.LinearDamping = 0.0
+        if not hasattr(obj, "AngularDamping"):
+            obj.addProperty("App::PropertyFloat", "AngularDamping", "Physics",
+                            "Air damping applied to angular (rotational) velocity of active "
+                            "bodies each step. 0 = no damping, 1 = full stop.")
+            obj.AngularDamping = 0.0
 
     def execute(self, obj):
         pass
