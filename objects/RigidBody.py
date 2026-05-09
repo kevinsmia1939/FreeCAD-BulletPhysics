@@ -29,6 +29,10 @@ class RigidBodyFeature:
                         "Tessellation chord deviation in mm for this body's mesh collision "
                         "shape. 0 = use Physics World default. Ignored for primitives.")
         obj.MeshResolution = 0.0
+        obj.addProperty("App::PropertyEnumeration", "ShapeOverride", "RigidBody",
+                        "Override the auto-detected collision shape type. "
+                        "'Auto' uses the shape detected from geometry.")
+        obj.ShapeOverride = ["Auto", "box", "sphere", "cylinder", "mesh"]
         obj.Proxy = self
 
     def execute(self, obj):

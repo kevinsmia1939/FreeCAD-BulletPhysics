@@ -34,9 +34,11 @@ class BodyTablePanel:
         "Type",
         "Density (kg/m³)",
         "Friction",
-        "Mesh Type",
+        "Collision Shape",
         "Mesh Resolution (mm)",
     ]
+
+    _SHAPE_OPTIONS = ["Auto", "box", "sphere", "cylinder", "mesh"]
 
     def __init__(self):
         try:
@@ -60,7 +62,7 @@ class BodyTablePanel:
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table, 1)   # stretch=1 → takes all surplus vertical space
+        layout.addWidget(self.table, 1)
 
         # ── Refresh ────────────────────────────────────────────────────────
         refresh_btn = QtWidgets.QPushButton("Refresh")
@@ -102,19 +104,30 @@ class BodyTablePanel:
         self.btn_apply_friction = QtWidgets.QPushButton("Apply")
         grid.addWidget(self.btn_apply_friction, 2, 2)
 
+        # Collision Shape override
+        grid.addWidget(QtWidgets.QLabel("Collision Shape:"), 3, 0)
+        self.inp_shape = QtWidgets.QComboBox()
+        self.inp_shape.addItems([""] + self._SHAPE_OPTIONS)
+        self.inp_shape.setToolTip(
+            "Override the collision shape type for the selected rows.\n"
+            "'Auto' restores automatic detection from geometry.")
+        grid.addWidget(self.inp_shape, 3, 1)
+        self.btn_apply_shape = QtWidgets.QPushButton("Apply")
+        grid.addWidget(self.btn_apply_shape, 3, 2)
+
         # Mesh Resolution
-        grid.addWidget(QtWidgets.QLabel("Mesh Resolution (mm):"), 3, 0)
+        grid.addWidget(QtWidgets.QLabel("Mesh Resolution (mm):"), 4, 0)
         self.inp_meshres = QtWidgets.QLineEdit()
         self.inp_meshres.setPlaceholderText("e.g. 0.5   (0 = world default)")
         self.inp_meshres.setToolTip(
-            "Only applies to rows whose Mesh Type is 'mesh'.\n"
+            "Only applies to rows whose effective Collision Shape is 'mesh'.\n"
             "Set to 0 to use the Physics World default.")
-        grid.addWidget(self.inp_meshres, 3, 1)
+        grid.addWidget(self.inp_meshres, 4, 1)
         self.btn_apply_meshres = QtWidgets.QPushButton("Apply")
         self.btn_apply_meshres.setEnabled(False)
         self.btn_apply_meshres.setToolTip(
             "Enabled when at least one selected row uses a tessellated mesh shape.")
-        grid.addWidget(self.btn_apply_meshres, 3, 2)
+        grid.addWidget(self.btn_apply_meshres, 4, 2)
 
         layout.addWidget(apply_group)
 
@@ -125,6 +138,7 @@ class BodyTablePanel:
         self.btn_apply_type.clicked.connect(self._apply_type)
         self.btn_apply_density.clicked.connect(self._apply_density)
         self.btn_apply_friction.clicked.connect(self._apply_friction)
+        self.btn_apply_shape.clicked.connect(self._apply_shape)
         self.btn_apply_meshres.clicked.connect(self._apply_meshres)
 
         self._populate()
@@ -154,12 +168,15 @@ class BodyTablePanel:
 
             for row, rb in enumerate(self._rb_list):
                 try:
-                    mesh_type = _detect_freecad_shape_type(rb.OriginalObject.Shape)
+                    detected = _detect_freecad_shape_type(rb.OriginalObject.Shape)
                 except Exception:
-                    mesh_type = "unknown"
+                    detected = "mesh"
+
+                override = getattr(rb, "ShapeOverride", "Auto")
+                effective = detected if override == "Auto" else override
 
                 body_res = getattr(rb, "MeshResolution", 0.0)
-                if mesh_type == "mesh":
+                if effective == "mesh":
                     res_text = (f"{body_res:.3f}" if body_res > 0
                                 else f"{world_res:.3f} (world)")
                 else:
@@ -181,12 +198,63 @@ class BodyTablePanel:
                 self.table.setItem(row, self.COL_TYPE,    _ro(rb.BodyType))
                 self.table.setItem(row, self.COL_DENSITY, _ed(f"{density:.2f}"))
                 self.table.setItem(row, self.COL_FRICT,   _ed(f"{rb.Friction:.4f}"))
-                self.table.setItem(row, self.COL_MESH,    _ro(mesh_type))
                 self.table.setItem(row, self.COL_RES,     _ro(res_text))
+
+                # Collision shape combo — one per row
+                combo = QtWidgets.QComboBox()
+                combo.addItems(self._SHAPE_OPTIONS)
+                combo.setCurrentText(override if override in self._SHAPE_OPTIONS else "Auto")
+                combo.setToolTip(f"Auto-detected geometry type: {detected}")
+                combo.currentTextChanged.connect(
+                    lambda text, r=row: self._on_shape_combo_changed(r, text))
+                self.table.setCellWidget(row, self.COL_MESH, combo)
 
             self.table.resizeColumnsToContents()
         finally:
             self._updating = False
+
+    # ── Helpers ─────────────────────────────────────────────────────────────
+
+    def _effective_mesh_type(self, row):
+        """Effective collision shape type for a row (respects override)."""
+        combo = self.table.cellWidget(row, self.COL_MESH)
+        if combo is None:
+            return "mesh"
+        override = combo.currentText()
+        if override != "Auto":
+            return override
+        if row >= len(self._rb_list):
+            return "mesh"
+        try:
+            from simulation.BulletSimulation import _detect_freecad_shape_type
+            return _detect_freecad_shape_type(self._rb_list[row].OriginalObject.Shape)
+        except Exception:
+            return "mesh"
+
+    def _update_res_cell(self, row):
+        """Refresh the resolution cell text after a shape type change."""
+        try:
+            from PySide2 import QtCore, QtWidgets
+        except ImportError:
+            from PySide import QtCore, QtWidgets
+
+        from objects.BulletWorld import find_world
+
+        world     = find_world()
+        world_res = getattr(world, "MeshResolution", 1.0) if world else 1.0
+
+        effective = self._effective_mesh_type(row)
+        if effective == "mesh":
+            rb = self._rb_list[row]
+            body_res = getattr(rb, "MeshResolution", 0.0)
+            res_text = (f"{body_res:.3f}" if body_res > 0
+                        else f"{world_res:.3f} (world)")
+        else:
+            res_text = "N/A"
+
+        it = self.table.item(row, self.COL_RES)
+        if it:
+            it.setText(res_text)
 
     # ── Selection ───────────────────────────────────────────────────────────
 
@@ -195,14 +263,10 @@ class BodyTablePanel:
 
     def _on_selection_changed(self):
         rows = self._selected_rows()
-        any_mesh = any(
-            self.table.item(r, self.COL_MESH) is not None
-            and self.table.item(r, self.COL_MESH).text() == "mesh"
-            for r in rows
-        )
+        any_mesh = any(self._effective_mesh_type(r) == "mesh" for r in rows)
         self.btn_apply_meshres.setEnabled(any_mesh)
 
-    # ── Inline cell edit ────────────────────────────────────────────────────
+    # ── Inline cell / combo edits ────────────────────────────────────────────
 
     def _on_item_changed(self, item):
         if self._updating:
@@ -219,6 +283,17 @@ class BodyTablePanel:
                 rb.Friction = max(0.0, float(item.text()))
         except ValueError:
             pass
+
+    def _on_shape_combo_changed(self, row, text):
+        if self._updating or row >= len(self._rb_list):
+            return
+        rb = self._rb_list[row]
+        try:
+            rb.ShapeOverride = text
+        except Exception:
+            pass
+        self._update_res_cell(row)
+        self._on_selection_changed()
 
     # ── Bulk apply ──────────────────────────────────────────────────────────
 
@@ -269,6 +344,26 @@ class BodyTablePanel:
         finally:
             self._updating = False
 
+    def _apply_shape(self):
+        val = self.inp_shape.currentText()
+        if not val:
+            return
+        self._updating = True
+        try:
+            for row in self._selected_rows():
+                rb = self._rb_list[row]
+                try:
+                    rb.ShapeOverride = val
+                except Exception:
+                    pass
+                combo = self.table.cellWidget(row, self.COL_MESH)
+                if combo:
+                    combo.setCurrentText(val)
+                self._update_res_cell(row)
+        finally:
+            self._updating = False
+        self._on_selection_changed()
+
     def _apply_meshres(self):
         try:
             val = max(0.0, float(self.inp_meshres.text()))
@@ -281,8 +376,7 @@ class BodyTablePanel:
         self._updating = True
         try:
             for row in self._selected_rows():
-                mesh_it = self.table.item(row, self.COL_MESH)
-                if mesh_it is None or mesh_it.text() != "mesh":
+                if self._effective_mesh_type(row) != "mesh":
                     continue
                 rb = self._rb_list[row]
                 rb.MeshResolution = val

@@ -147,7 +147,8 @@ def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
 
 
 def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
-                          client, is_static=False, mesh_resolution=1.0):
+                          client, is_static=False, mesh_resolution=1.0,
+                          forced_type=None):
     """
     Create the most accurate pybullet collision shape for fc_shape.
 
@@ -156,9 +157,12 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
       - static bodies  (mass=0): full triangle mesh → exact concave collision
       - dynamic bodies (mass>0): convex hull  → pybullet builds it automatically
 
+    *forced_type* overrides auto-detection when set to 'box', 'sphere',
+    'cylinder', or 'mesh'.
+
     Returns (collision_shape_id, characteristic_radius_m).
     """
-    shape_type = _detect_freecad_shape_type(fc_shape)
+    shape_type = forced_type or _detect_freecad_shape_type(fc_shape)
     hx, hy, hz = half_extents
 
     if shape_type == "sphere":
@@ -352,9 +356,12 @@ def run_simulation(callback=None):
             is_static = (rb.BodyType == "Passive")
             body_res  = getattr(rb, "MeshResolution", 0.0)
             effective_res = body_res if body_res > 0 else mesh_resolution
+            override = getattr(rb, "ShapeOverride", "Auto")
+            forced_type = None if override == "Auto" else override
             col, characteristic_radius = _make_collision_shape(
                 p, shape, half, orig_pl, world_center, client,
-                is_static=is_static, mesh_resolution=effective_res)
+                is_static=is_static, mesh_resolution=effective_res,
+                forced_type=forced_type)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             if rb.BodyType == "Active":
@@ -567,7 +574,7 @@ def delete_simulation_cache(doc=None):
 # Collision wireframe visualisation
 # ---------------------------------------------------------------------------
 
-def _build_collision_wireframe_shape(fc_shape, orig_pl):
+def _build_collision_wireframe_shape(fc_shape, orig_pl, forced_type=None):
     """
     Return (part_shape, local_offset_mm) where part_shape is a Part solid
     representing the collision envelope, centered at its local origin (so that
@@ -576,6 +583,8 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl):
 
     local_offset_mm is the FreeCAD-unit (mm) vector from orig_pl.Base to the
     collision centre, expressed in the body's local frame.
+
+    *forced_type* overrides auto-detection ('box', 'sphere', 'cylinder', 'mesh').
     """
     import Part
 
@@ -585,7 +594,7 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl):
     local_offset = inv_rot.multVec(world_center - orig_pl.Base)
 
     half = _local_half_extents(fc_shape, orig_pl)   # [hx, hy, hz] in mm
-    shape_type = _detect_freecad_shape_type(fc_shape)
+    shape_type = forced_type or _detect_freecad_shape_type(fc_shape)
 
     if shape_type == "sphere":
         radius = (half[0] + half[1] + half[2]) / 3.0
@@ -649,7 +658,10 @@ def create_collision_wireframes(doc=None):
         orig_pl   = original.Placement
         fc_shape  = original.Shape
 
-        wf_shape, local_offset = _build_collision_wireframe_shape(fc_shape, orig_pl)
+        override = getattr(rb, "ShapeOverride", "Auto")
+        forced_type = None if override == "Auto" else override
+        wf_shape, local_offset = _build_collision_wireframe_shape(
+            fc_shape, orig_pl, forced_type=forced_type)
 
         obj = doc.addObject("Part::Feature", f"_BtWF_{rb.Label}")
         obj.Label  = f"Collision: {rb.Label}"
