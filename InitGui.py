@@ -14,6 +14,7 @@ class BulletPhysicsWorkbench(Workbench):
     def Initialize(self):
         import commands.CmdCreateContainer
         import commands.CmdAddRigidBody
+        import commands.CmdAddLauncher
         import commands.CmdRunSimulation
 
         tool_list = [
@@ -21,6 +22,8 @@ class BulletPhysicsWorkbench(Workbench):
             "Separator",
             "BulletPhysics_AddActiveBody",
             "BulletPhysics_AddPassiveBody",
+            "Separator",
+            "BulletPhysics_AddLauncher",
             "Separator",
             "BulletPhysics_RunSimulation",
         ]

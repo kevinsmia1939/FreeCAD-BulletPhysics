@@ -9,6 +9,8 @@ class BulletContainerFeature:
                         "Rigid body summary table")
         obj.addProperty("App::PropertyLinkList", "RigidBodies", "Container",
                         "Rigid body objects managed by this simulation")
+        obj.addProperty("App::PropertyLinkList", "Launchers", "Container",
+                        "Velocity launcher objects managed by this simulation")
         obj.Proxy = self
 
     def execute(self, obj):
@@ -42,6 +44,8 @@ class BulletContainerViewProvider:
             children.append(obj.BodyTable)
         if hasattr(obj, "RigidBodies"):
             children.extend(rb for rb in obj.RigidBodies if rb is not None)
+        if hasattr(obj, "Launchers"):
+            children.extend(ln for ln in obj.Launchers if ln is not None)
         return children
 
     def onChanged(self, vobj, prop):

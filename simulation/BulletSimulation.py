@@ -25,6 +25,20 @@ def collect_rigid_bodies(doc=None):
     return result
 
 
+def collect_launchers(doc=None):
+    """Return all BulletLauncher objects that have a valid TargetBody."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    result = []
+    for obj in doc.Objects:
+        if (hasattr(obj, "Proxy")
+                and type(obj.Proxy).__name__ == "BulletLauncherFeature"
+                and hasattr(obj, "TargetBody")
+                and obj.TargetBody is not None):
+            result.append(obj)
+    return result
+
+
 def apply_frame(frame, doc=None):
     """
     Apply one recorded frame to the active document.
@@ -277,8 +291,15 @@ def run_simulation(callback=None):
     p.setPhysicsEngineParameter(
         numSolverIterations=solver_iters, physicsClientId=client)
 
+    launchers = collect_launchers()
+    # Build a lookup: rb.Name -> launcher object  (last one wins if duplicates)
+    launcher_by_rb = {ln.TargetBody.Name: ln for ln in launchers
+                      if ln.TargetBody is not None}
+
     # {bullet_id: (rb_doc_obj, link_obj, local_offset_mm)}
     body_map = {}
+    # {bullet_id: (fire_step, vel_x, vel_y, vel_z, actual_mass)}
+    launch_map = {}
 
     try:
         for rb in rigid_bodies:
@@ -350,6 +371,31 @@ def run_simulation(callback=None):
                     physicsClientId=client,
                 )
 
+            # If this body has a launcher, freeze it (mass=0) until launch time.
+            if rb.Name in launcher_by_rb and mass > 0:
+                ln = launcher_by_rb[rb.Name]
+                p.changeDynamics(body_id, -1, mass=0, physicsClientId=client)
+
+                # Normalise direction
+                d = ln.Direction
+                dlen = (d.x**2 + d.y**2 + d.z**2) ** 0.5
+                if dlen < 1e-9:
+                    dlen = 1.0
+                speed = max(0.0, ln.Velocity)
+                vx = d.x / dlen * speed
+                vy = d.y / dlen * speed
+                vz = d.z / dlen * speed
+
+                fire_step = max(0, int(ln.LaunchTime / time_step))
+                launch_map[body_id] = (fire_step, vx, vy, vz, mass,
+                                       characteristic_radius)
+                FreeCAD.Console.PrintMessage(
+                    f"BulletPhysics: launcher '{ln.Label}' → '{rb.Label}' "
+                    f"fires at step {fire_step} "
+                    f"(t={fire_step * time_step:.3f} s), "
+                    f"v=({vx:.2f}, {vy:.2f}, {vz:.2f}) m/s\n"
+                )
+
             # Local offset: placement origin → bbox centre in object's local frame
             local_offset = orig_pl.Rotation.inverted().multVec(
                 world_center - orig_pl.Base)
@@ -362,8 +408,30 @@ def run_simulation(callback=None):
             initial_frame[link.Name] = link.Placement.copy()
         frames = [initial_frame]
 
+        fired_launchers = set()
+
         # Simulation loop — each recorded frame runs sub_steps Bullet ticks
         for step in range(steps):
+            # Fire any launchers whose time has come (before stepping this frame)
+            for body_id, (fire_step, vx, vy, vz, actual_mass, char_r) in launch_map.items():
+                if step == fire_step and body_id not in fired_launchers:
+                    p.changeDynamics(
+                        body_id, -1,
+                        mass=actual_mass,
+                        ccdSweptSphereRadius=char_r * 0.4,
+                        activationState=4,
+                        linearDamping=linear_damping,
+                        angularDamping=angular_damping,
+                        physicsClientId=client,
+                    )
+                    p.resetBaseVelocity(
+                        body_id,
+                        linearVelocity=[vx, vy, vz],
+                        angularVelocity=[0.0, 0.0, 0.0],
+                        physicsClientId=client,
+                    )
+                    fired_launchers.add(body_id)
+
             for _ in range(sub_steps):
                 p.stepSimulation(physicsClientId=client)
 
