@@ -60,7 +60,7 @@ class BodyTablePanel:
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, 1)   # stretch=1 → takes all surplus vertical space
 
         # ── Refresh ────────────────────────────────────────────────────────
         refresh_btn = QtWidgets.QPushButton("Refresh")
