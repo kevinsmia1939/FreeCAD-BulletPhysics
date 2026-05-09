@@ -154,11 +154,11 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
 
     For recognised primitives (sphere, cylinder, box) the exact analytic shape
     is used.  For any other solid a mesh is tessellated from the FreeCAD shape:
-      - static bodies  (mass=0): full triangle mesh → exact concave collision
-      - dynamic bodies (mass>0): convex hull  → pybullet builds it automatically
+      - 'mesh' / static auto: btBvhTriangleMeshShape — exact concave, static only
+      - 'convex_hull' / dynamic auto: btConvexHullShape — convex approx, dynamic-safe
 
-    *forced_type* overrides auto-detection when set to 'box', 'sphere',
-    'cylinder', or 'mesh'.
+    *forced_type* overrides auto-detection: 'box', 'sphere', 'cylinder',
+    'convex_hull', or 'mesh'.
 
     Returns (collision_shape_id, characteristic_radius_m).
     """
@@ -208,10 +208,24 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         verts, indices = _tessellate_to_local(
             fc_shape, orig_pl, world_center, mesh_resolution)
 
-        if is_static:
-            # Static body: full concave triangle mesh (btBvhTriangleMeshShape).
-            # Passing indices triggers pybullet to build a BVH mesh — valid only
-            # for mass=0 bodies; dynamic bodies need a convex shape.
+        # Determine mesh mode:
+        #   forced "mesh"       → always concave BVH (btBvhTriangleMeshShape)
+        #   forced "convex_hull"→ always convex hull (btConvexHullShape)
+        #   Auto                → concave BVH for static, convex hull for dynamic
+        if forced_type == "mesh":
+            use_concave = True
+            if not is_static:
+                FreeCAD.Console.PrintWarning(
+                    "BulletPhysics: concave mesh forced on a dynamic body — "
+                    "rotation will not work correctly. "
+                    "Use 'convex_hull' for dynamic bodies.\n"
+                )
+        elif forced_type == "convex_hull":
+            use_concave = False
+        else:
+            use_concave = is_static
+
+        if use_concave:
             col = p.createCollisionShape(
                 p.GEOM_MESH,
                 vertices=verts,
@@ -224,9 +238,8 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
                 f"{len(indices)//3} tris, res={mesh_resolution} mm) for custom shape\n"
             )
         else:
-            # Dynamic body: convex hull (btConvexHullShape).
-            # Omitting indices tells pybullet to build a convex hull from vertices,
-            # which IS valid for dynamic bodies and produces correct rotation.
+            # Omitting indices tells pybullet to build a convex hull, which is
+            # valid for dynamic bodies and generates correct rotation forces.
             col = p.createCollisionShape(
                 p.GEOM_MESH,
                 vertices=verts,
@@ -614,7 +627,7 @@ def _build_collision_wireframe_shape(fc_shape, orig_pl, forced_type=None):
     local_offset_mm is the FreeCAD-unit (mm) vector from orig_pl.Base to the
     collision centre, expressed in the body's local frame.
 
-    *forced_type* overrides auto-detection ('box', 'sphere', 'cylinder', 'mesh').
+    *forced_type* overrides auto-detection ('box', 'sphere', 'cylinder', 'mesh', 'convex_hull').
     """
     import Part
 

@@ -31,8 +31,10 @@ class RigidBodyFeature:
         obj.MeshResolution = 0.0
         obj.addProperty("App::PropertyEnumeration", "ShapeOverride", "RigidBody",
                         "Override the auto-detected collision shape type. "
-                        "'Auto' uses the shape detected from geometry.")
-        obj.ShapeOverride = ["Auto", "box", "sphere", "cylinder", "mesh"]
+                        "'Auto' uses the shape detected from geometry. "
+                        "'mesh' = concave BVH (static only). "
+                        "'convex_hull' = convex hull (works for dynamic bodies).")
+        obj.ShapeOverride = ["Auto", "box", "sphere", "cylinder", "convex_hull", "mesh"]
         obj.Proxy = self
 
     def execute(self, obj):

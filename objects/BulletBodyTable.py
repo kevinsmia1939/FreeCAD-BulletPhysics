@@ -38,7 +38,7 @@ class BodyTablePanel:
         "Mesh Resolution (mm)",
     ]
 
-    _SHAPE_OPTIONS = ["Auto", "box", "sphere", "cylinder", "mesh"]
+    _SHAPE_OPTIONS = ["Auto", "box", "sphere", "cylinder", "convex_hull", "mesh"]
 
     def __init__(self):
         try:
@@ -176,7 +176,7 @@ class BodyTablePanel:
                 effective = detected if override == "Auto" else override
 
                 body_res = getattr(rb, "MeshResolution", 0.0)
-                if effective == "mesh":
+                if effective in ("mesh", "convex_hull"):
                     res_text = (f"{body_res:.3f}" if body_res > 0
                                 else f"{world_res:.3f} (world)")
                 else:
