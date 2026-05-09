@@ -193,7 +193,16 @@ def run_simulation(callback=None):
     Returns None on error.
     """
     try:
+        import sys
+        from preferences.BulletPreferences import get_pybullet_path
+        _custom_path = get_pybullet_path()
+        _path_inserted = False
+        if _custom_path and _custom_path not in sys.path:
+            sys.path.insert(0, _custom_path)
+            _path_inserted = True
         import pybullet as p
+        if _path_inserted:
+            sys.path.remove(_custom_path)
     except ImportError:
         _show_install_error()
         return None

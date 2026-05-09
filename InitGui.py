@@ -13,6 +13,8 @@ class BulletPhysicsWorkbench(Workbench):
         import commands.CmdCreateContainer
         import commands.CmdAddRigidBody
         import commands.CmdRunSimulation
+        from preferences.BulletPreferences import BulletPreferencesPage
+        FreeCADGui.addPreferencePage(BulletPreferencesPage, "Bullet Physics")
 
         tool_list = [
             "BulletPhysics_CreateContainer",
