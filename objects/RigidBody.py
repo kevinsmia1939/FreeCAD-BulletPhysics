@@ -25,6 +25,10 @@ class RigidBodyFeature:
         obj.addProperty("App::PropertyFloat", "Friction", "RigidBody",
                         "Friction coefficient")
         obj.Friction = 0.5
+        obj.addProperty("App::PropertyFloat", "MeshResolution", "RigidBody",
+                        "Tessellation chord deviation in mm for this body's mesh collision "
+                        "shape. 0 = use Physics World default. Ignored for primitives.")
+        obj.MeshResolution = 0.0
         obj.Proxy = self
 
     def execute(self, obj):

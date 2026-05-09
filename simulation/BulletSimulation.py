@@ -293,9 +293,11 @@ def run_simulation(callback=None):
                         world_center.z * MM_TO_M]
 
             is_static = (rb.BodyType == "Passive")
+            body_res  = getattr(rb, "MeshResolution", 0.0)
+            effective_res = body_res if body_res > 0 else mesh_resolution
             col, characteristic_radius = _make_collision_shape(
                 p, shape, half, orig_pl, world_center, client,
-                is_static=is_static, mesh_resolution=mesh_resolution)
+                is_static=is_static, mesh_resolution=effective_res)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             if rb.BodyType == "Active":
