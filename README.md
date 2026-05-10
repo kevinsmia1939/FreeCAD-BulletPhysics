@@ -6,6 +6,8 @@ A rigid-body physics simulation workbench for FreeCAD powered by [pybullet](http
 
 ## Screenshots
 
+Video tutorial in screenshot/tutorial.mp4
+
 ![Simulation overview — boxes and a sphere colliding mid-fall, Physics World properties visible in the Data tab](screenshot/overview.png)
 
 ![Collision boundaries — green wireframes show each body's collision envelope](screenshot/collision%20boundary.png)
