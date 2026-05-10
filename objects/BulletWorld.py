@@ -38,6 +38,12 @@ class BulletWorldFeature:
                         "Primitives (box, sphere, cylinder) are unaffected.")
         obj.MeshResolution = 1.0
 
+        obj.addProperty("App::PropertyFloat", "CollisionMargin", "Simulation",
+                        "Bullet collision margin in metres applied to every collision shape. "
+                        "Smaller values let objects appear to touch. "
+                        "Bullet's built-in default is 0.04 m.")
+        obj.CollisionMargin = 0.001
+
         obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                         "Air damping applied to linear (translational) velocity of active "
                         "bodies each step. 0 = no damping, 1 = full stop. "
@@ -84,6 +90,12 @@ class BulletWorldFeature:
                             "Air damping applied to angular (rotational) velocity of active "
                             "bodies each step. 0 = no damping, 1 = full stop.")
             obj.AngularDamping = 0.0
+        if not hasattr(obj, "CollisionMargin"):
+            obj.addProperty("App::PropertyFloat", "CollisionMargin", "Simulation",
+                            "Bullet collision margin in metres applied to every collision shape. "
+                            "Smaller values let objects appear to touch. "
+                            "Bullet's built-in default is 0.04 m.")
+            obj.CollisionMargin = 0.001
 
     def execute(self, obj):
         pass
@@ -196,7 +208,7 @@ class WorldSettingsPanel:
         sim_form.addRow("Solver Iterations:", self.inp_solver)
 
         self.inp_substeps = QtWidgets.QSpinBox()
-        self.inp_substeps.setRange(1, 100)
+        self.inp_substeps.setRange(1, 1000)
         self.inp_substeps.setToolTip(
             "Physics sub-steps per recorded frame.\n"
             "Higher values improve collision accuracy at the cost of simulation time.")
@@ -214,6 +226,19 @@ class WorldSettingsPanel:
         self.inp_meshres.setValue(getattr(world_obj, "MeshResolution", 1.0))
         sim_form.addRow("Mesh Resolution:", self.inp_meshres)
 
+        self.inp_margin = QtWidgets.QDoubleSpinBox()
+        self.inp_margin.setRange(0.0, 1.0)
+        self.inp_margin.setDecimals(4)
+        self.inp_margin.setSingleStep(0.001)
+        self.inp_margin.setSuffix(" m")
+        self.inp_margin.setToolTip(
+            "Bullet collision margin applied to every shape.\n"
+            "Smaller values let objects appear to touch.\n"
+            "0.001 m is a good default for typical FreeCAD models.\n"
+            "Bullet's built-in default is 0.04 m.")
+        self.inp_margin.setValue(getattr(world_obj, "CollisionMargin", 0.001))
+        sim_form.addRow("Collision Margin:", self.inp_margin)
+
         root.addWidget(sim_group)
         root.addStretch(1)
 
@@ -229,6 +254,7 @@ class WorldSettingsPanel:
         self.inp_solver.valueChanged.connect(self._apply)
         self.inp_substeps.valueChanged.connect(self._apply)
         self.inp_meshres.valueChanged.connect(self._apply)
+        self.inp_margin.valueChanged.connect(self._apply)
 
     def _apply(self):
         obj = self._obj
@@ -242,6 +268,7 @@ class WorldSettingsPanel:
         obj.SolverIterations = self.inp_solver.value()
         obj.SubSteps         = self.inp_substeps.value()
         obj.MeshResolution   = self.inp_meshres.value()
+        obj.CollisionMargin  = self.inp_margin.value()
 
     def reject(self):
         import FreeCADGui

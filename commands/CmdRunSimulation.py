@@ -27,6 +27,7 @@ class SimulationPanel:
         self._wireframe_infos = []
         self._mesh_infos = []
         self._sim_stop_requested = False
+        self._closed = False
 
         self.form = QtWidgets.QWidget()
         self.form.setWindowTitle("Bullet Physics")
@@ -177,7 +178,8 @@ class SimulationPanel:
         root.addStretch()
 
         # ── Timer ─────────────────────────────────────────────────────────────
-        self.timer = QtCore.QTimer()
+        # Parent to self.form so Qt stops and destroys it when the form closes.
+        self.timer = QtCore.QTimer(self.form)
         self.timer.timeout.connect(self._advance)
 
         # ── Wiring ────────────────────────────────────────────────────────────
@@ -311,50 +313,74 @@ class SimulationPanel:
         return mapping.get(self.speed_combo.currentText(), 1.0)
 
     def _update_timer_interval(self):
-        if self._playing:
+        if self._closed or not self._playing:
+            return
+        try:
             ms = max(1, int(self.time_step * 1000 / self._speed_multiplier()))
             self.timer.setInterval(ms)
+        except RuntimeError:
+            self.timer.stop()
 
     def _update_frame_label(self, idx):
-        if not self.frames:
-            self.frame_label.setText("Frame — / —  (—)")
+        if self._closed:
             return
-        total = len(self.frames) - 1
-        t = idx * self.time_step
-        self.frame_label.setText(f"Frame {idx} / {total}  ({t:.3f} s)")
+        try:
+            if not self.frames:
+                self.frame_label.setText("Frame — / —  (—)")
+                return
+            total = len(self.frames) - 1
+            t = idx * self.time_step
+            self.frame_label.setText(f"Frame {idx} / {total}  ({t:.3f} s)")
+        except RuntimeError:
+            pass
 
     def _on_slider(self, value):
-        if self.frames:
-            from simulation.BulletSimulation import (
-                apply_frame, update_collision_wireframes,
-                update_collision_mesh_displays)
-            frame = self.frames[value]
-            apply_frame(frame)
-            if self._wireframe_infos:
-                update_collision_wireframes(self._wireframe_infos, frame)
-            if self._mesh_infos:
-                update_collision_mesh_displays(self._mesh_infos, frame)
-            if self._wireframe_infos or self._mesh_infos:
-                FreeCADGui.updateGui()
-            self._update_frame_label(value)
+        if self._closed:
+            return
+        try:
+            if self.frames:
+                from simulation.BulletSimulation import (
+                    apply_frame, update_collision_wireframes,
+                    update_collision_mesh_displays)
+                frame = self.frames[value]
+                apply_frame(frame)
+                if self._wireframe_infos:
+                    update_collision_wireframes(self._wireframe_infos, frame)
+                if self._mesh_infos:
+                    update_collision_mesh_displays(self._mesh_infos, frame)
+                if self._wireframe_infos or self._mesh_infos:
+                    FreeCADGui.updateGui()
+                self._update_frame_label(value)
+        except RuntimeError:
+            pass
 
     def _go_start(self):
+        if self._closed:
+            return
         self._stop()
         self.slider.setValue(0)
 
     def _go_end(self):
+        if self._closed:
+            return
         self._stop()
         self.slider.setValue(len(self.frames) - 1)
 
     def _step_back(self):
+        if self._closed:
+            return
         self._stop()
         self.slider.setValue(max(0, self.slider.value() - 1))
 
     def _step_forward(self):
+        if self._closed:
+            return
         self._stop()
         self.slider.setValue(min(len(self.frames) - 1, self.slider.value() + 1))
 
     def _toggle_play(self):
+        if self._closed:
+            return
         if self._playing:
             self._stop()
         else:
@@ -362,26 +388,39 @@ class SimulationPanel:
 
     def _start_play(self):
         self._playing = True
-        self.btn_play.setIcon(
-            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
+        try:
+            self.btn_play.setIcon(
+                self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
+        except RuntimeError:
+            pass
         ms = max(1, int(self.time_step * 1000 / self._speed_multiplier()))
         self.timer.start(ms)
 
     def _stop(self):
         self._playing = False
         self.timer.stop()
-        self.btn_play.setIcon(
-            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPlay))
+        try:
+            self.btn_play.setIcon(
+                self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPlay))
+        except RuntimeError:
+            pass
 
     def _advance(self):
-        next_idx = self.slider.value() + 1
-        if next_idx >= len(self.frames):
-            if self.loop_chk.isChecked():
-                next_idx = 0
-            else:
-                self._stop()
-                return
-        self.slider.setValue(next_idx)
+        if self._closed:
+            self.timer.stop()
+            return
+        try:
+            next_idx = self.slider.value() + 1
+            if next_idx >= len(self.frames):
+                if self.loop_chk.isChecked():
+                    next_idx = 0
+                else:
+                    self._stop()
+                    return
+            self.slider.setValue(next_idx)
+        except RuntimeError:
+            # Widget already destroyed (dialog closed while timer was running).
+            self.timer.stop()
 
     def _reset(self):
         """Restore every Link to the placement it had before simulation."""
@@ -538,6 +577,7 @@ class SimulationPanel:
         self.refresh_mesh_btn.setEnabled(False)
 
     def reject(self):
+        self._closed = True
         self._stop()
         self._hide_wireframes()
         self._hide_mesh_displays()

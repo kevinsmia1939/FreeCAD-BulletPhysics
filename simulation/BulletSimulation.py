@@ -150,7 +150,7 @@ def _parse_vhacd_obj(filepath):
     return hulls
 
 
-def _make_vhacd_compound_shape(p, verts_m, indices_flat, client):
+def _make_vhacd_compound_shape(p, verts_m, indices_flat, client, collision_margin=0.001):
     """
     Decompose a concave mesh into convex hulls via V-HACD and return a pybullet
     GEOM_COMPOUND collision shape valid for dynamic bodies.
@@ -198,7 +198,8 @@ def _make_vhacd_compound_shape(p, verts_m, indices_flat, client):
         return None
 
     child_shapes = [
-        p.createCollisionShape(p.GEOM_MESH, vertices=hv, physicsClientId=client)
+        p.createCollisionShape(p.GEOM_MESH, vertices=hv,
+                               physicsClientId=client)
         for hv in hull_verts_list
     ]
     n = len(child_shapes)
@@ -247,7 +248,7 @@ def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
 
 def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
                           client, is_static=False, mesh_resolution=1.0,
-                          forced_type=None):
+                          forced_type=None, collision_margin=0.001):
     """
     Create the most accurate pybullet collision shape for fc_shape.
 
@@ -334,7 +335,7 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         elif use_concave:
             # Dynamic body with concave mesh: decompose into convex hulls via
             # V-HACD so Bullet can compute correct collision response and rotation.
-            col = _make_vhacd_compound_shape(p, verts, indices, client)
+            col = _make_vhacd_compound_shape(p, verts, indices, client, collision_margin)
             if col is None:
                 # V-HACD unavailable or failed: fall back to single convex hull.
                 col = p.createCollisionShape(
@@ -420,6 +421,7 @@ def run_simulation(callback=None):
         solver_iters     = world.SolverIterations
         sub_steps        = max(1, getattr(world, "SubSteps", 4))
         mesh_resolution  = max(0.001, getattr(world, "MeshResolution", 1.0))
+        collision_margin = max(0.0, getattr(world, "CollisionMargin", 0.001))
         linear_damping   = max(0.0, min(1.0, getattr(world, "LinearDamping", 0.0)))
         angular_damping  = max(0.0, min(1.0, getattr(world, "AngularDamping", 0.0)))
     else:
@@ -430,6 +432,7 @@ def run_simulation(callback=None):
         solver_iters     = 10
         sub_steps        = 4
         mesh_resolution  = 1.0
+        collision_margin = 0.001
         linear_damping   = 0.0
         angular_damping  = 0.0
 
@@ -512,7 +515,7 @@ def run_simulation(callback=None):
             col, characteristic_radius = _make_collision_shape(
                 p, shape, half, orig_pl, world_center, client,
                 is_static=is_static, mesh_resolution=effective_res,
-                forced_type=forced_type)
+                forced_type=forced_type, collision_margin=collision_margin)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             if rb.BodyType == "Active":
@@ -533,6 +536,7 @@ def run_simulation(callback=None):
                 body_id, -1,
                 restitution=rb.Restitution,
                 lateralFriction=rb.Friction,
+                collisionMargin=collision_margin,
                 physicsClientId=client,
             )
 
@@ -899,13 +903,15 @@ def create_collision_mesh_displays(doc=None):
     shape is 'mesh' or 'convex_hull'.  Primitives (box, sphere, cylinder) are
     skipped since they use analytic shapes with no tessellation.
 
-    Returns a list of (obj, link_name, orig_pl) tuples for animation updates.
+    Returns a list of (obj, link_name, local_offset_mm) tuples for animation
+    updates.  local_offset_mm is the vector (in body-local mm) from the link's
+    placement origin to the bbox centre — same convention used by run_simulation.
     """
     if doc is None:
         doc = FreeCAD.ActiveDocument
 
     from objects.BulletWorld import find_world
-    world    = find_world(doc)
+    world     = find_world(doc)
     world_res = max(0.001, getattr(world, "MeshResolution", 1.0)) if world else 1.0
 
     result = []
@@ -927,18 +933,34 @@ def create_collision_mesh_displays(doc=None):
         try:
             import Mesh as _Mesh
 
-            # copy() strips the OCCT TopLoc_Location → tessellate in local coords
-            local_shape = fc_shape.copy()
-            verts, tri_faces = local_shape.tessellate(mesh_res)
+            # Tessellate in world space (same as the physics code), then
+            # transform vertices to bbox-centre-relative local space (mm).
+            # This avoids the ambiguity of fc_shape.copy().tessellate() which
+            # may return world-space vertices for PartDesign bodies.
+            bb          = fc_shape.BoundBox
+            world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+            inv_rot     = orig_pl.Rotation.inverted()
+            local_offset = inv_rot.multVec(world_center - orig_pl.Base)
 
-            triangles = [(verts[i0], verts[i1], verts[i2])
+            verts_world, tri_faces = fc_shape.tessellate(mesh_res)
+
+            verts_local = []
+            for v in verts_world:
+                rel = FreeCAD.Vector(v.x - world_center.x,
+                                     v.y - world_center.y,
+                                     v.z - world_center.z)
+                verts_local.append(inv_rot.multVec(rel))
+
+            triangles = [(verts_local[i0], verts_local[i1], verts_local[i2])
                          for i0, i1, i2 in tri_faces]
             mesh = _Mesh.Mesh(triangles)
 
             obj = doc.addObject("Mesh::Feature", f"_BtMesh_{rb.Label}")
-            obj.Label     = f"Collision Mesh: {rb.Label}"
-            obj.Mesh      = mesh
-            obj.Placement = orig_pl
+            obj.Label    = f"Collision Mesh: {rb.Label}"
+            obj.Mesh     = mesh
+            # Vertices are centred at bbox centre in body-local orientation;
+            # place the mesh so that centre lands at world_center.
+            obj.Placement = FreeCAD.Placement(world_center, orig_pl.Rotation)
 
             if FreeCAD.GuiUp:
                 import FreeCADGui
@@ -948,7 +970,7 @@ def create_collision_mesh_displays(doc=None):
                 vobj.LineWidth   = 1.0
                 vobj.Selectable  = False
 
-            result.append((obj, rb.BodyLink.Name, orig_pl))
+            result.append((obj, rb.BodyLink.Name, local_offset))
 
         except Exception as exc:
             FreeCAD.Console.PrintWarning(
@@ -961,10 +983,13 @@ def create_collision_mesh_displays(doc=None):
 
 def update_collision_mesh_displays(mesh_infos, frame):
     """Reposition each mesh display to match the given simulation frame."""
-    for (obj, link_name, _) in mesh_infos:
+    for (obj, link_name, local_offset) in mesh_infos:
         if link_name not in frame:
             continue
-        obj.Placement = frame[link_name]
+        link_pl = frame[link_name]
+        # Recover the bbox world centre from the link placement + stored offset.
+        new_world_center = link_pl.Base + link_pl.Rotation.multVec(local_offset)
+        obj.Placement = FreeCAD.Placement(new_world_center, link_pl.Rotation)
 
 
 def remove_collision_mesh_displays(mesh_infos, doc=None):
