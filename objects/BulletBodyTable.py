@@ -390,6 +390,9 @@ class BodyTablePanel:
         finally:
             self._updating = False
 
+    def needsFullSpace(self):
+        return True
+
     def reject(self):
         import FreeCADGui
         FreeCADGui.Control.closeDialog()
