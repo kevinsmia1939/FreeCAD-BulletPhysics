@@ -209,17 +209,19 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
             fc_shape, orig_pl, world_center, mesh_resolution)
 
         # Determine mesh mode:
-        #   forced "mesh"       → always concave BVH (btBvhTriangleMeshShape)
-        #   forced "convex_hull"→ always convex hull (btConvexHullShape)
+        #   forced "mesh"       → concave BVH for static; auto-falls back to
+        #                         convex hull for dynamic (BVH is static-only)
+        #   forced "convex_hull"→ always convex hull
         #   Auto                → concave BVH for static, convex hull for dynamic
-        if forced_type == "mesh":
+        if forced_type == "mesh" and not is_static:
+            use_concave = False
+            FreeCAD.Console.PrintMessage(
+                "BulletPhysics: 'mesh' override on a dynamic body — "
+                "using convex hull instead (concave BVH is static-only). "
+                "Set ShapeOverride to 'convex_hull' to suppress this message.\n"
+            )
+        elif forced_type == "mesh":
             use_concave = True
-            if not is_static:
-                FreeCAD.Console.PrintWarning(
-                    "BulletPhysics: concave mesh forced on a dynamic body — "
-                    "rotation will not work correctly. "
-                    "Use 'convex_hull' for dynamic bodies.\n"
-                )
         elif forced_type == "convex_hull":
             use_concave = False
         else:
