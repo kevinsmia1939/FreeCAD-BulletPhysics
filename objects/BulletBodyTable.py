@@ -51,6 +51,9 @@ class BodyTablePanel:
 
         self.form = QtWidgets.QWidget()
         self.form.setWindowTitle("Rigid Body Summary")
+        self.form.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding)
         layout = QtWidgets.QVBoxLayout(self.form)
 
         # ── Table ──────────────────────────────────────────────────────────
