@@ -204,12 +204,21 @@ class BodyTablePanel:
                 self.table.setItem(row, self.COL_RES,     _ro(res_text))
 
                 # Collision shape combo — one per row
+                # Each item stores the ShapeOverride value as item data so the
+                # "Auto" entry can display the detected type without ambiguity.
                 combo = QtWidgets.QComboBox()
-                combo.addItems(self._SHAPE_OPTIONS)
-                combo.setCurrentText(override if override in self._SHAPE_OPTIONS else "Auto")
+                combo.addItem(f"{detected} (auto)", "Auto")
+                for opt in self._SHAPE_OPTIONS[1:]:   # skip "Auto"
+                    combo.addItem(opt, opt)
+                # Select by stored data value
+                target = override if override in self._SHAPE_OPTIONS else "Auto"
+                for i in range(combo.count()):
+                    if combo.itemData(i) == target:
+                        combo.setCurrentIndex(i)
+                        break
                 combo.setToolTip(f"Auto-detected geometry type: {detected}")
-                combo.currentTextChanged.connect(
-                    lambda text, r=row: self._on_shape_combo_changed(r, text))
+                combo.currentIndexChanged.connect(
+                    lambda _idx, r=row: self._on_shape_combo_changed(r))
                 self.table.setCellWidget(row, self.COL_MESH, combo)
 
             self.table.resizeColumnsToContents()
@@ -223,9 +232,9 @@ class BodyTablePanel:
         combo = self.table.cellWidget(row, self.COL_MESH)
         if combo is None:
             return "mesh"
-        override = combo.currentText()
-        if override != "Auto":
-            return override
+        actual = combo.currentData()
+        if actual and actual != "Auto":
+            return actual
         if row >= len(self._rb_list):
             return "mesh"
         try:
@@ -287,12 +296,14 @@ class BodyTablePanel:
         except ValueError:
             pass
 
-    def _on_shape_combo_changed(self, row, text):
+    def _on_shape_combo_changed(self, row):
         if self._updating or row >= len(self._rb_list):
             return
+        combo = self.table.cellWidget(row, self.COL_MESH)
+        actual = combo.currentData() if combo else "Auto"
         rb = self._rb_list[row]
         try:
-            rb.ShapeOverride = text
+            rb.ShapeOverride = actual
         except Exception:
             pass
         self._update_res_cell(row)
@@ -361,7 +372,10 @@ class BodyTablePanel:
                     pass
                 combo = self.table.cellWidget(row, self.COL_MESH)
                 if combo:
-                    combo.setCurrentText(val)
+                    for i in range(combo.count()):
+                        if combo.itemData(i) == val:
+                            combo.setCurrentIndex(i)
+                            break
                 self._update_res_cell(row)
         finally:
             self._updating = False
