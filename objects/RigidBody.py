@@ -50,9 +50,11 @@ class RigidBodyFeature:
 class RigidBodyViewProvider:
     def __init__(self, vobj):
         vobj.Proxy = self
+        vobj.Visibility = True
 
     def attach(self, vobj):
         self.Object = vobj.Object
+        vobj.Visibility = True
 
     def getIcon(self):
         import os
