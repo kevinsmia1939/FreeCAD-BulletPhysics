@@ -26,9 +26,14 @@ class BulletContainerFeature:
 class BulletContainerViewProvider:
     def __init__(self, vobj):
         vobj.Proxy = self
+        vobj.Visibility = True
 
     def attach(self, vobj):
         self.Object = vobj.Object
+        vobj.Visibility = True
+
+    def isShow(self):
+        return True
 
     def getIcon(self):
         import os
