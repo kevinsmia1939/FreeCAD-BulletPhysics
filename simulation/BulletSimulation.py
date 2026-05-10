@@ -780,6 +780,111 @@ def cleanup_stale_wireframes(doc=None):
         doc.recompute()
 
 
+# ---------------------------------------------------------------------------
+# Tessellated collision mesh visualisation
+# ---------------------------------------------------------------------------
+
+def create_collision_mesh_displays(doc=None):
+    """
+    Create orange wireframe Mesh::Feature objects showing the actual tessellated
+    triangle mesh used for collision, for each body whose effective collision
+    shape is 'mesh' or 'convex_hull'.  Primitives (box, sphere, cylinder) are
+    skipped since they use analytic shapes with no tessellation.
+
+    Returns a list of (obj, link_name, orig_pl) tuples for animation updates.
+    """
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+
+    from objects.BulletWorld import find_world
+    world    = find_world(doc)
+    world_res = max(0.001, getattr(world, "MeshResolution", 1.0)) if world else 1.0
+
+    result = []
+
+    for rb in collect_rigid_bodies(doc):
+        override = getattr(rb, "ShapeOverride", "Auto")
+        fc_shape = rb.OriginalObject.Shape
+        orig_pl  = rb.OriginalObject.Placement
+
+        eff_type = (_detect_freecad_shape_type(fc_shape)
+                    if override == "Auto" else override)
+
+        if eff_type not in ("mesh", "convex_hull"):
+            continue
+
+        body_res = getattr(rb, "MeshResolution", 0.0)
+        mesh_res = body_res if body_res > 0.0 else world_res
+
+        try:
+            import Mesh as _Mesh
+
+            # copy() strips the OCCT TopLoc_Location → tessellate in local coords
+            local_shape = fc_shape.copy()
+            verts, tri_faces = local_shape.tessellate(mesh_res)
+
+            triangles = [(verts[i0], verts[i1], verts[i2])
+                         for i0, i1, i2 in tri_faces]
+            mesh = _Mesh.Mesh(triangles)
+
+            obj = doc.addObject("Mesh::Feature", f"_BtMesh_{rb.Label}")
+            obj.Label     = f"Collision Mesh: {rb.Label}"
+            obj.Mesh      = mesh
+            obj.Placement = orig_pl
+
+            if FreeCAD.GuiUp:
+                import FreeCADGui
+                vobj = obj.ViewObject
+                vobj.DisplayMode = "Wireframe"
+                vobj.LineColor   = (1.0, 0.5, 0.0)   # orange
+                vobj.LineWidth   = 1.0
+                vobj.Selectable  = False
+
+            result.append((obj, rb.BodyLink.Name, orig_pl))
+
+        except Exception as exc:
+            FreeCAD.Console.PrintWarning(
+                f"BulletPhysics: mesh display failed for {rb.Label}: {exc}\n"
+            )
+
+    doc.recompute()
+    return result
+
+
+def update_collision_mesh_displays(mesh_infos, frame):
+    """Reposition each mesh display to match the given simulation frame."""
+    for (obj, link_name, _) in mesh_infos:
+        if link_name not in frame:
+            continue
+        obj.Placement = frame[link_name]
+
+
+def remove_collision_mesh_displays(mesh_infos, doc=None):
+    """Delete all mesh display objects from the document."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    for (obj, _, _) in mesh_infos:
+        try:
+            doc.removeObject(obj.Name)
+        except Exception:
+            pass
+    if mesh_infos:
+        doc.recompute()
+
+
+def cleanup_stale_mesh_displays(doc=None):
+    """Remove any leftover _BtMesh_ objects (e.g. from a previous crash)."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    if doc is None:
+        return
+    stale = [o for o in doc.Objects if o.Name.startswith("_BtMesh_")]
+    for o in stale:
+        doc.removeObject(o.Name)
+    if stale:
+        doc.recompute()
+
+
 def _show_install_error():
     try:
         from PySide2.QtWidgets import QMessageBox

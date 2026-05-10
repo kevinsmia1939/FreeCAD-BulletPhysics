@@ -25,6 +25,7 @@ class SimulationPanel:
         self.time_step = 1.0 / 60.0
         self._playing = False
         self._wireframe_infos = []
+        self._mesh_infos = []
         self._sim_stop_requested = False
 
         self.form = QtWidgets.QWidget()
@@ -75,6 +76,20 @@ class SimulationPanel:
         self.refresh_collision_btn.setEnabled(False)
         collision_row.addWidget(self.refresh_collision_btn)
         sim_layout.addLayout(collision_row)
+
+        mesh_row = QtWidgets.QHBoxLayout()
+        self.mesh_chk = QtWidgets.QCheckBox("Show Collision Mesh")
+        self.mesh_chk.setToolTip(
+            "Display orange wireframe of the actual tessellated triangle mesh\n"
+            "used for collision detection.  Only shown for bodies whose collision\n"
+            "shape is 'mesh' or 'convex_hull' — primitives are skipped.")
+        mesh_row.addWidget(self.mesh_chk)
+        self.refresh_mesh_btn = QtWidgets.QPushButton("Refresh")
+        self.refresh_mesh_btn.setToolTip(
+            "Rebuild collision mesh displays from the current solid positions.")
+        self.refresh_mesh_btn.setEnabled(False)
+        mesh_row.addWidget(self.refresh_mesh_btn)
+        sim_layout.addLayout(mesh_row)
 
         root.addWidget(sim_group)
 
@@ -181,10 +196,14 @@ class SimulationPanel:
 
         self.collision_chk.stateChanged.connect(self._on_collision_chk)
         self.refresh_collision_btn.clicked.connect(self._rebuild_wireframes)
+        self.mesh_chk.stateChanged.connect(self._on_mesh_chk)
+        self.refresh_mesh_btn.clicked.connect(self._rebuild_mesh_displays)
 
         self._refresh_world_label()
-        from simulation.BulletSimulation import cleanup_stale_wireframes
+        from simulation.BulletSimulation import (
+            cleanup_stale_wireframes, cleanup_stale_mesh_displays)
         cleanup_stale_wireframes()
+        cleanup_stale_mesh_displays()
         self._try_load_cache()
 
     # ── World info ──────────────────────────────────────────────────────────
@@ -244,6 +263,8 @@ class SimulationPanel:
         self._populate_playback(apply_first_frame=True)
         if self.collision_chk.isChecked():
             self._rebuild_wireframes()
+        if self.mesh_chk.isChecked():
+            self._rebuild_mesh_displays()
         n = len(self.frames) - 1
         total_secs = n * self.time_step
         stopped = " (stopped early)" if self._sim_stop_requested else ""
@@ -304,11 +325,16 @@ class SimulationPanel:
 
     def _on_slider(self, value):
         if self.frames:
-            from simulation.BulletSimulation import apply_frame, update_collision_wireframes
+            from simulation.BulletSimulation import (
+                apply_frame, update_collision_wireframes,
+                update_collision_mesh_displays)
             frame = self.frames[value]
             apply_frame(frame)
             if self._wireframe_infos:
                 update_collision_wireframes(self._wireframe_infos, frame)
+            if self._mesh_infos:
+                update_collision_mesh_displays(self._mesh_infos, frame)
+            if self._wireframe_infos or self._mesh_infos:
                 FreeCADGui.updateGui()
             self._update_frame_label(value)
 
@@ -373,13 +399,20 @@ class SimulationPanel:
             self.slider.setValue(0)
             self.slider.blockSignals(False)
             self._update_frame_label(0)
-        # Wireframes: rebuild from original placements (frame 0)
+        # Wireframes / mesh displays: sync back to frame 0
         if self._wireframe_infos:
             if self.frames:
                 from simulation.BulletSimulation import update_collision_wireframes
                 update_collision_wireframes(self._wireframe_infos, self.frames[0])
             else:
                 self._rebuild_wireframes()
+        if self._mesh_infos:
+            if self.frames:
+                from simulation.BulletSimulation import update_collision_mesh_displays
+                update_collision_mesh_displays(self._mesh_infos, self.frames[0])
+            else:
+                self._rebuild_mesh_displays()
+        if self._wireframe_infos or self._mesh_infos:
             FreeCADGui.updateGui()
 
     def _delete_cache(self):
@@ -441,6 +474,8 @@ class SimulationPanel:
         delete_simulation_cache()
         self._hide_wireframes()
         self.collision_chk.setChecked(False)
+        self._hide_mesh_displays()
+        self.mesh_chk.setChecked(False)
         t = frame_idx * self.time_step
         self._clear_playback(
             f"Frame {frame_idx} ({t:.3f} s) baked as new origin. "
@@ -463,7 +498,6 @@ class SimulationPanel:
         if self._wireframe_infos:
             remove_collision_wireframes(self._wireframe_infos)
         self._wireframe_infos = create_collision_wireframes()
-        # If a frame is already loaded, advance wireframes to the current frame
         if self.frames and self._wireframe_infos:
             update_collision_wireframes(
                 self._wireframe_infos, self.frames[self.slider.value()])
@@ -476,9 +510,37 @@ class SimulationPanel:
             self._wireframe_infos = []
         self.refresh_collision_btn.setEnabled(False)
 
+    def _on_mesh_chk(self, state):
+        if state:
+            self._rebuild_mesh_displays()
+            self.refresh_mesh_btn.setEnabled(True)
+        else:
+            self._hide_mesh_displays()
+
+    def _rebuild_mesh_displays(self):
+        """(Re)create tessellated mesh displays from the current OriginalObject placements."""
+        from simulation.BulletSimulation import (
+            create_collision_mesh_displays, update_collision_mesh_displays,
+            remove_collision_mesh_displays)
+        if self._mesh_infos:
+            remove_collision_mesh_displays(self._mesh_infos)
+        self._mesh_infos = create_collision_mesh_displays()
+        if self.frames and self._mesh_infos:
+            update_collision_mesh_displays(
+                self._mesh_infos, self.frames[self.slider.value()])
+            FreeCADGui.updateGui()
+
+    def _hide_mesh_displays(self):
+        from simulation.BulletSimulation import remove_collision_mesh_displays
+        if self._mesh_infos:
+            remove_collision_mesh_displays(self._mesh_infos)
+            self._mesh_infos = []
+        self.refresh_mesh_btn.setEnabled(False)
+
     def reject(self):
         self._stop()
         self._hide_wireframes()
+        self._hide_mesh_displays()
         FreeCADGui.Control.closeDialog()
 
 
