@@ -32,9 +32,6 @@ class BulletContainerViewProvider:
         self.Object = vobj.Object
         vobj.Visibility = True
 
-    def isShow(self):
-        return True
-
     def getIcon(self):
         import os
         import BulletUtils
