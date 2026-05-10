@@ -148,7 +148,7 @@ def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
 
 def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
                           client, is_static=False, mesh_resolution=1.0,
-                          forced_type=None, collision_margin_m=0.0001):
+                          forced_type=None):
     """
     Create the most accurate pybullet collision shape for fc_shape.
 
@@ -159,10 +159,6 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
 
     *forced_type* overrides auto-detection: 'box', 'sphere', 'cylinder',
     'convex_hull', or 'mesh'.
-
-    *collision_margin_m* is the Bullet GJK margin in metres applied to mesh
-    shapes.  Bullet's default (0.04 m = 4 cm) inflates the envelope so much
-    that touching objects bounce apart at t=0.  Keep this small (0.0001–0.001 m).
 
     Returns (collision_shape_id, characteristic_radius_m).
     """
@@ -235,13 +231,11 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
                 vertices=verts,
                 indices=indices,
                 flags=p.GEOM_CONCAVE_INTERNAL_EDGE,
-                collisionMargin=collision_margin_m,
                 physicsClientId=client,
             )
             FreeCAD.Console.PrintMessage(
                 f"BulletPhysics: concave mesh ({len(verts)} verts, "
-                f"{len(indices)//3} tris, res={mesh_resolution} mm, "
-                f"margin={collision_margin_m*1000:.2f} mm) for custom shape\n"
+                f"{len(indices)//3} tris, res={mesh_resolution} mm) for custom shape\n"
             )
         else:
             # Omitting indices tells pybullet to build a convex hull, which is
@@ -249,13 +243,11 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
             col = p.createCollisionShape(
                 p.GEOM_MESH,
                 vertices=verts,
-                collisionMargin=collision_margin_m,
                 physicsClientId=client,
             )
             FreeCAD.Console.PrintMessage(
                 f"BulletPhysics: convex hull ({len(verts)} verts, "
-                f"res={mesh_resolution} mm, "
-                f"margin={collision_margin_m*1000:.2f} mm) for custom shape\n"
+                f"res={mesh_resolution} mm) for custom shape\n"
             )
         return col, min(half_extents)
 
@@ -319,21 +311,19 @@ def run_simulation(callback=None):
         time_step        = world.TimeStep
         solver_iters     = world.SolverIterations
         sub_steps        = max(1, getattr(world, "SubSteps", 4))
-        mesh_resolution    = max(0.001, getattr(world, "MeshResolution", 1.0))
-        collision_margin_m = max(0.0, getattr(world, "CollisionMargin", 0.1)) * MM_TO_M
-        linear_damping     = max(0.0, min(1.0, getattr(world, "LinearDamping", 0.0)))
-        angular_damping    = max(0.0, min(1.0, getattr(world, "AngularDamping", 0.0)))
+        mesh_resolution  = max(0.001, getattr(world, "MeshResolution", 1.0))
+        linear_damping   = max(0.0, min(1.0, getattr(world, "LinearDamping", 0.0)))
+        angular_damping  = max(0.0, min(1.0, getattr(world, "AngularDamping", 0.0)))
     else:
-        gravity_mag        = 9.81
-        gravity_dir        = FreeCAD.Vector(0, 0, -1)
-        end_time           = 10.0
-        time_step          = 1.0 / 60.0
-        solver_iters       = 10
-        sub_steps          = 4
-        mesh_resolution    = 1.0
-        collision_margin_m = 0.0001   # 0.1 mm
-        linear_damping     = 0.0
-        angular_damping    = 0.0
+        gravity_mag      = 9.81
+        gravity_dir      = FreeCAD.Vector(0, 0, -1)
+        end_time         = 10.0
+        time_step        = 1.0 / 60.0
+        solver_iters     = 10
+        sub_steps        = 4
+        mesh_resolution  = 1.0
+        linear_damping   = 0.0
+        angular_damping  = 0.0
 
     steps = max(1, round(end_time / time_step))
 
@@ -414,8 +404,7 @@ def run_simulation(callback=None):
             col, characteristic_radius = _make_collision_shape(
                 p, shape, half, orig_pl, world_center, client,
                 is_static=is_static, mesh_resolution=effective_res,
-                forced_type=forced_type,
-                collision_margin_m=collision_margin_m)
+                forced_type=forced_type)
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             if rb.BodyType == "Active":

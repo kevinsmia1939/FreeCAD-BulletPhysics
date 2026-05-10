@@ -38,12 +38,6 @@ class BulletWorldFeature:
                         "Primitives (box, sphere, cylinder) are unaffected.")
         obj.MeshResolution = 1.0
 
-        obj.addProperty("App::PropertyFloat", "CollisionMargin", "Physics",
-                        "Extra gap (mm) added around each mesh collision shape by Bullet's "
-                        "GJK solver. The default Bullet value (40 mm) causes objects placed "
-                        "touching to bounce apart at t=0. Keep this small (0.1–1 mm).")
-        obj.CollisionMargin = 0.1
-
         obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                         "Air damping applied to linear (translational) velocity of active "
                         "bodies each step. 0 = no damping, 1 = full stop. "
@@ -80,11 +74,6 @@ class BulletWorldFeature:
                             "collision shapes. Smaller = finer mesh, more accurate but slower. "
                             "Primitives (box, sphere, cylinder) are unaffected.")
             obj.MeshResolution = 1.0
-        if not hasattr(obj, "CollisionMargin"):
-            obj.addProperty("App::PropertyFloat", "CollisionMargin", "Physics",
-                            "Extra gap (mm) added around each mesh collision shape by Bullet's "
-                            "GJK solver. Keep small (0.1–1 mm) to avoid touching objects bouncing.")
-            obj.CollisionMargin = 0.1
         if not hasattr(obj, "LinearDamping"):
             obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                             "Air damping applied to linear (translational) velocity of active "
