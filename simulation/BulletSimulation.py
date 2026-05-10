@@ -119,6 +119,105 @@ def _local_half_extents(fc_shape, orig_pl):
     return [bb.XLength / 2.0, bb.YLength / 2.0, bb.ZLength / 2.0]
 
 
+def _write_obj(verts_m, indices_flat, filepath):
+    """Write a triangle mesh (metres) as a Wavefront OBJ file for VHACD input."""
+    with open(filepath, "w") as f:
+        for v in verts_m:
+            f.write(f"v {v[0]:.8f} {v[1]:.8f} {v[2]:.8f}\n")
+        for i in range(0, len(indices_flat), 3):
+            f.write(f"f {indices_flat[i]+1} {indices_flat[i+1]+1} {indices_flat[i+2]+1}\n")
+
+
+def _parse_vhacd_obj(filepath):
+    """
+    Parse a V-HACD output OBJ file.
+    Returns a list of vertex lists, one list per convex hull.
+    Vertices are in the same coordinate space as the input (metres).
+    """
+    hulls, current = [], []
+    with open(filepath) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith(("o ", "g ")):
+                if current:
+                    hulls.append(current)
+                current = []
+            elif line.startswith("v ") and not line.startswith(("vn ", "vt ")):
+                parts = line.split()
+                current.append([float(parts[1]), float(parts[2]), float(parts[3])])
+    if current:
+        hulls.append(current)
+    return hulls
+
+
+def _make_vhacd_compound_shape(p, verts_m, indices_flat, client):
+    """
+    Decompose a concave mesh into convex hulls via V-HACD and return a pybullet
+    GEOM_COMPOUND collision shape valid for dynamic bodies.
+
+    V-HACD is bundled with pybullet.  The mesh is written to a temporary OBJ,
+    decomposed, then the resulting convex hulls are combined into one compound
+    shape.  Returns None if V-HACD is unavailable or fails.
+    """
+    import tempfile, os
+
+    if not hasattr(p, "vhacd"):
+        FreeCAD.Console.PrintWarning(
+            "BulletPhysics: pybullet.vhacd not available — "
+            "falling back to convex hull for dynamic mesh body.\n"
+        )
+        return None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        obj_in  = os.path.join(tmpdir, "in.obj")
+        obj_out = os.path.join(tmpdir, "out.obj")
+        log_out = os.path.join(tmpdir, "vhacd.log")
+
+        _write_obj(verts_m, indices_flat, obj_in)
+
+        try:
+            p.vhacd(obj_in, obj_out, log_out, physicsClientId=client)
+        except Exception as exc:
+            FreeCAD.Console.PrintWarning(
+                f"BulletPhysics: V-HACD decomposition failed ({exc})\n"
+            )
+            return None
+
+        if not os.path.exists(obj_out):
+            FreeCAD.Console.PrintWarning(
+                "BulletPhysics: V-HACD produced no output file.\n"
+            )
+            return None
+
+        hull_verts_list = _parse_vhacd_obj(obj_out)
+
+    if not hull_verts_list:
+        FreeCAD.Console.PrintWarning(
+            "BulletPhysics: V-HACD output contained no convex hulls.\n"
+        )
+        return None
+
+    child_shapes = [
+        p.createCollisionShape(p.GEOM_MESH, vertices=hv, physicsClientId=client)
+        for hv in hull_verts_list
+    ]
+    n = len(child_shapes)
+
+    compound = p.createCollisionShape(
+        p.GEOM_COMPOUND,
+        children=child_shapes,
+        childPositions=[[0.0, 0.0, 0.0]] * n,
+        childOrientations=[[0.0, 0.0, 0.0, 1.0]] * n,
+        physicsClientId=client,
+    )
+
+    FreeCAD.Console.PrintMessage(
+        f"BulletPhysics: V-HACD → {n} convex hull(s) compound shape "
+        f"for dynamic concave mesh\n"
+    )
+    return compound
+
+
 def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
     """
     Tessellate fc_shape and return (vertices, flat_indices) in body-local space.
@@ -214,17 +313,13 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         #   Auto                → concave BVH for static, convex hull for dynamic
         if forced_type == "mesh":
             use_concave = True
-            if not is_static:
-                FreeCAD.Console.PrintMessage(
-                    "BulletPhysics: concave mesh on a dynamic body — "
-                    "rotation may be limited; use 'convex_hull' if rotation is needed.\n"
-                )
         elif forced_type == "convex_hull":
             use_concave = False
         else:
             use_concave = is_static
 
-        if use_concave:
+        if use_concave and is_static:
+            # Static body: exact concave BVH triangle mesh.
             col = p.createCollisionShape(
                 p.GEOM_MESH,
                 vertices=verts,
@@ -234,11 +329,25 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
             )
             FreeCAD.Console.PrintMessage(
                 f"BulletPhysics: concave mesh ({len(verts)} verts, "
-                f"{len(indices)//3} tris, res={mesh_resolution} mm) for custom shape\n"
+                f"{len(indices)//3} tris, res={mesh_resolution} mm) for static body\n"
             )
+        elif use_concave:
+            # Dynamic body with concave mesh: decompose into convex hulls via
+            # V-HACD so Bullet can compute correct collision response and rotation.
+            col = _make_vhacd_compound_shape(p, verts, indices, client)
+            if col is None:
+                # V-HACD unavailable or failed: fall back to single convex hull.
+                col = p.createCollisionShape(
+                    p.GEOM_MESH,
+                    vertices=verts,
+                    physicsClientId=client,
+                )
+                FreeCAD.Console.PrintMessage(
+                    f"BulletPhysics: convex hull fallback ({len(verts)} verts, "
+                    f"res={mesh_resolution} mm) after V-HACD failure\n"
+                )
         else:
-            # Omitting indices tells pybullet to build a convex hull, which is
-            # valid for dynamic bodies and generates correct rotation forces.
+            # convex_hull forced or auto for dynamic body.
             col = p.createCollisionShape(
                 p.GEOM_MESH,
                 vertices=verts,
