@@ -1,29 +1,105 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="64"
+   height="64"
+   viewBox="0 0 64 64"
+   version="1.1"
+   id="svg5"
+   sodipodi:docname="BulletContainer.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview5"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="13.171875"
+     inkscape:cx="32"
+     inkscape:cy="32"
+     inkscape:window-width="1920"
+     inkscape:window-height="1052"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5" />
   <!-- Container icon: open folder with a bullet/physics sphere -->
-  <defs>
-    <linearGradient id="folderGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#f0c040"/>
-      <stop offset="100%" stop-color="#c08000"/>
+  <defs
+     id="defs4">
+    <linearGradient
+       id="folderGrad"
+       x1="0%"
+       y1="0%"
+       x2="0%"
+       y2="100%">
+      <stop
+         offset="0%"
+         stop-color="#f0c040"
+         id="stop1" />
+      <stop
+         offset="100%"
+         stop-color="#c08000"
+         id="stop2" />
     </linearGradient>
-    <radialGradient id="sphereGrad" cx="38%" cy="35%" r="60%">
-      <stop offset="0%" stop-color="#ffaa55"/>
-      <stop offset="100%" stop-color="#cc5500"/>
+    <radialGradient
+       id="sphereGrad"
+       cx="38%"
+       cy="35%"
+       r="60%">
+      <stop
+         offset="0%"
+         stop-color="#ffaa55"
+         id="stop3" />
+      <stop
+         offset="100%"
+         stop-color="#cc5500"
+         id="stop4" />
     </radialGradient>
   </defs>
   <!-- folder back -->
-  <rect x="4" y="20" width="56" height="38" rx="4"
-        fill="url(#folderGrad)" stroke="#906000" stroke-width="1.5"/>
+  <rect
+     x="4"
+     y="20"
+     width="56"
+     height="38"
+     rx="4"
+     fill="url(#folderGrad)"
+     stroke="#906000"
+     stroke-width="1.5"
+     id="rect4" />
   <!-- folder tab -->
-  <path d="M 4 20 L 4 14 Q 4 11 7 11 L 24 11 Q 27 11 29 14 L 32 20 Z"
-        fill="#f0c040" stroke="#906000" stroke-width="1.5"/>
+  <path
+     d="M 4 20 L 4 14 Q 4 11 7 11 L 24 11 Q 27 11 29 14 L 32 20 Z"
+     fill="#f0c040"
+     stroke="#906000"
+     stroke-width="1.5"
+     id="path4" />
   <!-- folder front face (open) -->
-  <rect x="4" y="26" width="56" height="32" rx="4"
-        fill="#fad060" stroke="#906000" stroke-width="1.5" opacity="0.85"/>
+  <rect
+     x="4"
+     y="26"
+     width="56"
+     height="32"
+     rx="4"
+     fill="#fad060"
+     stroke="#906000"
+     stroke-width="1.5"
+     opacity="0.85"
+     id="rect5" />
   <!-- bullet sphere inside folder -->
-  <circle cx="32" cy="42" r="12"
-          fill="url(#sphereGrad)" stroke="#a04000" stroke-width="1.5"/>
+  <circle
+     cx="32"
+     cy="42"
+     r="12"
+     fill="url(#sphereGrad)"
+     stroke="#a04000"
+     stroke-width="1.5"
+     id="circle5" />
   <!-- small orbit ring around sphere -->
-  <ellipse cx="32" cy="42" rx="17" ry="5"
-           fill="none" stroke="#cc7700" stroke-width="1.2" opacity="0.7"/>
 </svg>

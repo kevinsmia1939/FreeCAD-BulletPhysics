@@ -1,24 +1,89 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="ballG" cx="38%" cy="35%" r="60%">
-      <stop offset="0%" stop-color="#ffaa55"/>
-      <stop offset="100%" stop-color="#cc5500"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="64"
+   height="64"
+   viewBox="0 0 64 64"
+   version="1.1"
+   id="svg6"
+   sodipodi:docname="BulletLauncher.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview6"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="9.3139221"
+     inkscape:cx="38.3834"
+     inkscape:cy="23.888969"
+     inkscape:window-width="1920"
+     inkscape:window-height="1052"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg6" />
+  <defs
+     id="defs2">
+    <radialGradient
+       id="ballG"
+       cx="34.94"
+       cy="34.175"
+       r="15.300001"
+       fx="34.94"
+       fy="34.175"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.3705185,0,0,1.3705185,-28.105592,-12.978589)">
+      <stop
+         offset="0%"
+         stop-color="#ffaa55"
+         id="stop1" />
+      <stop
+         offset="100%"
+         stop-color="#cc5500"
+         id="stop2" />
     </radialGradient>
   </defs>
   <!-- Clock face (launch time indicator) -->
-  <circle cx="16" cy="48" r="12" fill="#e8e8e8" stroke="#666" stroke-width="1.5"/>
-  <line x1="16" y1="48" x2="16" y2="40" stroke="#333" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="16" y1="48" x2="21" y2="51" stroke="#e33" stroke-width="1.5" stroke-linecap="round"/>
   <!-- Sphere -->
-  <circle cx="38" cy="38" r="12" fill="url(#ballG)" stroke="#b05000" stroke-width="1.5"/>
+  <circle
+     cx="23.974112"
+     cy="39.101116"
+     r="16.446222"
+     fill="url(#ballG)"
+     stroke="#b05000"
+     stroke-width="2.05578"
+     id="circle3"
+     style="fill:url(#ballG)" />
   <!-- Launch arrow -->
-  <line x1="44" y1="32" x2="58" y2="10" stroke="#ff6600" stroke-width="3"
-        stroke-linecap="round"/>
-  <polygon points="58,10 50,14 56,20" fill="#ff6600"/>
   <!-- Speed lines -->
-  <line x1="28" y1="28" x2="22" y2="18" stroke="#ff990055" stroke-width="2"
-        stroke-linecap="round"/>
-  <line x1="32" y1="26" x2="28" y2="14" stroke="#ff990055" stroke-width="2"
-        stroke-linecap="round"/>
+  <path
+     style="fill:#b05000;stroke:#b05000;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;fill-opacity:1"
+     d="M 38.759182,25.12368 50.784191,11.810277"
+     id="path6"
+     sodipodi:nodetypes="cc" />
+  <path
+     sodipodi:type="star"
+     style="fill:#ef8f3a;stroke:none;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;fill-opacity:1"
+     id="path7"
+     inkscape:flatsided="true"
+     sodipodi:sides="3"
+     sodipodi:cx="-2.4694214"
+     sodipodi:cy="-14.816529"
+     sodipodi:r1="2.9481738"
+     sodipodi:r2="1.4740869"
+     sodipodi:arg1="0.57790194"
+     sodipodi:arg2="1.6250995"
+     inkscape:rounded="0"
+     inkscape:randomized="0"
+     d="M 1.9223219e-7,-13.206037 -5.0988595,-13.483194 l 2.7894546,-4.277163 z"
+     inkscape:transform-center-x="1.8409663"
+     inkscape:transform-center-y="0.98136505"
+     transform="matrix(2.9550784,2.2449042,-2.2449042,2.9550784,24.819836,61.137897)" />
 </svg>
