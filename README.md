@@ -4,6 +4,18 @@ A rigid-body physics simulation workbench for FreeCAD powered by [pybullet](http
 
 ---
 
+## Screenshots
+
+![Simulation overview — boxes and a sphere colliding mid-fall, Physics World properties visible in the Data tab](screenshot/overview.png)
+
+![Collision boundaries — green wireframes show each body's collision envelope](screenshot/collision%20boundary.png)
+
+![Rigid Body Summary table — editable per-body properties with bulk-apply controls](screenshot/summary%20table.png)
+
+![Physics World Settings panel — gravity, damping, time step, solver, and mesh resolution](screenshot/world%20settings.png)
+
+---
+
 ## Features
 
 - **Active & Passive rigid bodies** — active bodies are driven by physics; passive bodies act as static colliders (floors, walls, ramps)
