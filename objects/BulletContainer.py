@@ -26,11 +26,17 @@ class BulletContainerFeature:
 class BulletContainerViewProvider:
     def __init__(self, vobj):
         vobj.Proxy = self
-        vobj.Visibility = True
 
     def attach(self, vobj):
         self.Object = vobj.Object
-        vobj.Visibility = True
+        from pivy import coin
+        vobj.addDisplayMode(coin.SoGroup(), "Default")
+
+    def getDisplayModes(self, vobj):
+        return ["Default"]
+
+    def getDefaultDisplayMode(self):
+        return "Default"
 
     def getIcon(self):
         import os
