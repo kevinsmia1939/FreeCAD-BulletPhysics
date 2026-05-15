@@ -1,6 +1,6 @@
 # FreeCAD Bullet Physics Workbench
 
-A rigid-body physics simulation workbench for FreeCAD powered by [pybullet](https://pybullet.org). Simulate objects falling, colliding, and settling, then play back the result on an interactive timeline.
+A rigid-body physics simulation workbench for FreeCAD powered by [pybullet](https://github.com/bulletphysics/bullet3). Simulate objects falling, colliding, and settling, then play back the result on an interactive timeline.
 
 ---
 
@@ -37,8 +37,7 @@ Video tutorial in screenshot/tutorial.mp4
 | Requirement | Version |
 |---|---|
 | FreeCAD | 1.0 or later |
-| Python | 3.x (bundled with FreeCAD) |
-| pybullet | any recent version |
+| pybullet | 3.x |
 
 ---
 
