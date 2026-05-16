@@ -29,7 +29,7 @@ Video tutorial in screenshot/tutorial.mp4
 - **Rigid Body Summary table** — editable overview of all bodies (type, density, friction, mesh type, mesh resolution) with bulk-apply inputs for changing multiple bodies at once
 - **Bake frame as new origin** — commit any timeline frame back to the original objects as the new rest position; fully undoable with Ctrl+Z
 - **Physics World settings** — gravity magnitude and direction, simulation end time, frame time step, sub-steps (accuracy), solver iterations, and global mesh resolution, all stored in the document
-
+- **Recursive downgrade** — Break down array of solids into individual components, useful when setting up a simulation with many solids as rigid body using array and need to separate them.
 ---
 
 ## Requirements
