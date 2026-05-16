@@ -7,8 +7,11 @@ except ImportError:
     from PySide.QtWidgets import QMessageBox
 
 
-def _draft_icon():
-    return "/usr/share/FreeCAD/Mod/Draft/Resources/icons/DraftWorkbench.svg"
+def _button_down_icon():
+    import os
+    import BulletUtils
+
+    return os.path.join(BulletUtils.MOD_PATH, "icons", "button_down.svg")
 
 
 def _has_shape(obj):
@@ -77,7 +80,7 @@ def _make_solid_copy(solid):
 class DowngradeCommand:
     def GetResources(self):
         return {
-            "Pixmap": _draft_icon(),
+            "Pixmap": _button_down_icon(),
             "MenuText": "Downgrade Compound",
             "ToolTip": (
                 "Break selected compound or array objects into individual solid "
