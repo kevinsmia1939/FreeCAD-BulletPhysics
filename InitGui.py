@@ -15,6 +15,7 @@ class BulletPhysicsWorkbench(Workbench):
         import commands.CmdCreateContainer
         import commands.CmdAddRigidBody
         import commands.CmdAddLauncher
+        import commands.CmdDowngrade
         import commands.CmdRunSimulation
 
         tool_list = [
@@ -22,6 +23,8 @@ class BulletPhysicsWorkbench(Workbench):
             "Separator",
             "BulletPhysics_AddActiveBody",
             "BulletPhysics_AddPassiveBody",
+            "Separator",
+            "BulletPhysics_Downgrade",
             "Separator",
             "BulletPhysics_AddLauncher",
             "Separator",
