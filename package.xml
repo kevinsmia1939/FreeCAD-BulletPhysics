@@ -2,7 +2,7 @@
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>FreeCAD-BulletPhysics</name>
   <description>Bullet Physics rigid-body simulation workbench for FreeCAD.</description>
-  <version>0.1.0</version>
+  <version>1.0.0</version>
   <date>2026-05-08</date>
   <maintainer email="andythe_great@protonmail.com">Kavin Teenakul</maintainer>
   <license>GPL-3.0-or-later</license>
