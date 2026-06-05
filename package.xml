@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+<package format="1">
   <name>Bullet Physics</name>
   <description>Rigid-body physics simulation powered by pybullet.</description>
   <version>1.0.0</version>
@@ -8,15 +8,17 @@
   <license file="LICENSE">GPL-3.0-or-later</license>
   <url type="repository" branch="main">https://github.com/kevinsmia1939/FreeCAD-BulletPhysics</url>
   <url type="readme">https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/raw/main/README.md</url>
-  <icon>icons/BulletPhysics.svg</icon>
-  <depend type="python">pybullet</depend>
-  <tag>workbench</tag>
-  <tag>simulation</tag>
-  <tag>physics</tag>
+
   <content>
     <workbench>
-      <classname>BulletPhysicsWorkbench</classname>
+      <classname>Bullet Physics Workbench</classname>
+      <description>Rigid-body physics simulation powered by pybullet.</description>
       <subdirectory>./</subdirectory>
+      <icon>icons/BulletPhysics.svg</icon>
+      <depend>pybullet</depend>
+      <tag>simulation</tag>
+      <tag>physics</tag>
     </workbench>
   </content>
+
 </package>
