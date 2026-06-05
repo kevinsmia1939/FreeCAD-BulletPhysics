@@ -1,20 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
-  <name>FreeCAD-BulletPhysics</name>
-  <description>Bullet Physics rigid-body simulation workbench for FreeCAD.</description>
+  <name>Bullet Physics</name>
+  <description>Rigid-body physics simulation powered by pybullet.</description>
   <version>1.0.0</version>
-  <date>2026-05-16</date>
+  <date>2026-06-05</date>
   <maintainer email="andythe_great@protonmail.com">Kavin Teenakul</maintainer>
-  <license>GPL-3.0-or-later</license>
-  <url type="repository">https://github.com/kevinsmia1939/FreeCAD-BulletPhysics</url>
+  <license file="LICENSE">GPL-3.0-or-later</license>
+  <url type="repository" branch="main">https://github.com/kevinsmia1939/FreeCAD-BulletPhysics</url>
+  <url type="readme">https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/raw/main/README.md</url>
+  <icon>icons/BulletPhysics.svg</icon>
+  <depend type="python">pybullet</depend>
+  <tag>workbench</tag>
+  <tag>simulation</tag>
+  <tag>physics</tag>
   <content>
     <workbench>
       <classname>BulletPhysicsWorkbench</classname>
-      <subdirectory>.</subdirectory>
-      <icon>icons/BulletPhysics.svg</icon>
+      <subdirectory>./</subdirectory>
     </workbench>
   </content>
-  <pythondeps>
-    <dep>pybullet</dep>
-  </pythondeps>
 </package>
