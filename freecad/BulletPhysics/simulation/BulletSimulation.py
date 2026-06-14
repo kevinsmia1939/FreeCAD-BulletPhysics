@@ -383,7 +383,7 @@ def run_simulation(callback=None):
     """
     try:
         import sys
-        from preferences.BulletPreferences import get_pybullet_path
+        from ..preferences.BulletPreferences import get_pybullet_path
         _custom_path = get_pybullet_path()
         _path_inserted = False
         if _custom_path and _custom_path not in sys.path:
@@ -396,7 +396,7 @@ def run_simulation(callback=None):
         _show_install_error()
         return None
 
-    from objects.BulletWorld import find_world
+    from ..objects.BulletWorld import find_world
 
     rigid_bodies = collect_rigid_bodies()
     if not rigid_bodies:
@@ -910,7 +910,7 @@ def create_collision_mesh_displays(doc=None):
     if doc is None:
         doc = FreeCAD.ActiveDocument
 
-    from objects.BulletWorld import find_world
+    from ..objects.BulletWorld import find_world
     world     = find_world(doc)
     world_res = max(0.001, getattr(world, "MeshResolution", 1.0)) if world else 1.0
 

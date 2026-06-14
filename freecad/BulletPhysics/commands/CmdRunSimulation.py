@@ -6,7 +6,7 @@ from PySide import QtCore, QtWidgets
 
 
 def _mod_path():
-    import BulletUtils
+    from .. import BulletUtils
     return BulletUtils.MOD_PATH
 
 
@@ -199,7 +199,7 @@ class SimulationPanel:
         self.refresh_mesh_btn.clicked.connect(self._rebuild_mesh_displays)
 
         self._refresh_world_label()
-        from simulation.BulletSimulation import (
+        from ..simulation.BulletSimulation import (
             cleanup_stale_wireframes, cleanup_stale_mesh_displays)
         cleanup_stale_wireframes()
         cleanup_stale_mesh_displays()
@@ -208,7 +208,7 @@ class SimulationPanel:
     # ── World info ──────────────────────────────────────────────────────────
 
     def _refresh_world_label(self):
-        from objects.BulletWorld import find_world
+        from ..objects.BulletWorld import find_world
         world = find_world()
         if world:
             d = world.GravityDirection
@@ -233,7 +233,7 @@ class SimulationPanel:
     # ── Simulation ──────────────────────────────────────────────────────────
 
     def _run_simulation(self):
-        from simulation.BulletSimulation import run_simulation
+        from ..simulation.BulletSimulation import run_simulation
         self._stop()
         self._refresh_world_label()
         self._sim_stop_requested = False
@@ -257,7 +257,7 @@ class SimulationPanel:
             return
 
         self.frames, self.time_step = result
-        from simulation.BulletSimulation import save_simulation_cache
+        from ..simulation.BulletSimulation import save_simulation_cache
         save_simulation_cache(self.frames, self.time_step)
         self._populate_playback(apply_first_frame=True)
         if self.collision_chk.isChecked():
@@ -276,7 +276,7 @@ class SimulationPanel:
         self.sim_status.setText("Stopping…")
 
     def _try_load_cache(self):
-        from simulation.BulletSimulation import load_simulation_cache
+        from ..simulation.BulletSimulation import load_simulation_cache
         result = load_simulation_cache()
         if result is None:
             return
@@ -290,7 +290,7 @@ class SimulationPanel:
     def _populate_playback(self, apply_first_frame=False):
         """Enable all playback controls after frames are loaded."""
         if apply_first_frame:
-            from simulation.BulletSimulation import apply_frame
+            from ..simulation.BulletSimulation import apply_frame
             apply_frame(self.frames[0])
         self.slider.setRange(0, len(self.frames) - 1)
         self.slider.setValue(0)
@@ -336,7 +336,7 @@ class SimulationPanel:
             return
         try:
             if self.frames:
-                from simulation.BulletSimulation import (
+                from ..simulation.BulletSimulation import (
                     apply_frame, update_collision_wireframes,
                     update_collision_mesh_displays)
                 frame = self.frames[value]
@@ -422,7 +422,7 @@ class SimulationPanel:
     def _reset(self):
         """Restore every Link to the placement it had before simulation."""
         self._stop()
-        from simulation.BulletSimulation import collect_rigid_bodies
+        from ..simulation.BulletSimulation import collect_rigid_bodies
         for rb in collect_rigid_bodies():
             try:
                 rb.BodyLink.Placement = rb.OriginalObject.Placement.copy()
@@ -438,13 +438,13 @@ class SimulationPanel:
         # Wireframes / mesh displays: sync back to frame 0
         if self._wireframe_infos:
             if self.frames:
-                from simulation.BulletSimulation import update_collision_wireframes
+                from ..simulation.BulletSimulation import update_collision_wireframes
                 update_collision_wireframes(self._wireframe_infos, self.frames[0])
             else:
                 self._rebuild_wireframes()
         if self._mesh_infos:
             if self.frames:
-                from simulation.BulletSimulation import update_collision_mesh_displays
+                from ..simulation.BulletSimulation import update_collision_mesh_displays
                 update_collision_mesh_displays(self._mesh_infos, self.frames[0])
             else:
                 self._rebuild_mesh_displays()
@@ -452,7 +452,7 @@ class SimulationPanel:
             FreeCADGui.updateGui()
 
     def _delete_cache(self):
-        from simulation.BulletSimulation import delete_simulation_cache
+        from ..simulation.BulletSimulation import delete_simulation_cache
         deleted = delete_simulation_cache()
         if deleted:
             self._clear_playback("Cache deleted.")
@@ -486,7 +486,7 @@ class SimulationPanel:
         frame_idx = self.slider.value()
         frame     = self.frames[frame_idx]
 
-        from simulation.BulletSimulation import (
+        from ..simulation.BulletSimulation import (
             collect_rigid_bodies, delete_simulation_cache)
 
         doc = FreeCAD.ActiveDocument
@@ -528,7 +528,7 @@ class SimulationPanel:
 
     def _rebuild_wireframes(self):
         """(Re)create wireframes from the current OriginalObject placements."""
-        from simulation.BulletSimulation import (
+        from ..simulation.BulletSimulation import (
             create_collision_wireframes, update_collision_wireframes,
             remove_collision_wireframes)
         if self._wireframe_infos:
@@ -540,7 +540,7 @@ class SimulationPanel:
             FreeCADGui.updateGui()
 
     def _hide_wireframes(self):
-        from simulation.BulletSimulation import remove_collision_wireframes
+        from ..simulation.BulletSimulation import remove_collision_wireframes
         if self._wireframe_infos:
             remove_collision_wireframes(self._wireframe_infos)
             self._wireframe_infos = []
@@ -555,7 +555,7 @@ class SimulationPanel:
 
     def _rebuild_mesh_displays(self):
         """(Re)create tessellated mesh displays from the current OriginalObject placements."""
-        from simulation.BulletSimulation import (
+        from ..simulation.BulletSimulation import (
             create_collision_mesh_displays, update_collision_mesh_displays,
             remove_collision_mesh_displays)
         if self._mesh_infos:
@@ -567,7 +567,7 @@ class SimulationPanel:
             FreeCADGui.updateGui()
 
     def _hide_mesh_displays(self):
-        from simulation.BulletSimulation import remove_collision_mesh_displays
+        from ..simulation.BulletSimulation import remove_collision_mesh_displays
         if self._mesh_infos:
             remove_collision_mesh_displays(self._mesh_infos)
             self._mesh_infos = []
@@ -588,7 +588,7 @@ class SimulationPanel:
 class RunSimulationCommand:
     def GetResources(self):
         return {
-            "Pixmap": os.path.join(_mod_path(), "icons", "RunSimulation.svg"),
+            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "RunSimulation.svg"),
             "MenuText": "Run Simulation",
             "ToolTip": "Simulate and play back with timeline. Settings from Physics World.",
         }

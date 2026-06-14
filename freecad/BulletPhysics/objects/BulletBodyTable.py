@@ -148,9 +148,9 @@ class BodyTablePanel:
     def _populate(self):
         from PySide import QtCore, QtWidgets
 
-        from simulation.BulletSimulation import (
+        from ..simulation.BulletSimulation import (
             collect_rigid_bodies, _detect_freecad_shape_type)
-        from objects.BulletWorld import find_world
+        from .BulletWorld import find_world
 
         self._updating = True
         try:
@@ -232,7 +232,7 @@ class BodyTablePanel:
         if row >= len(self._rb_list):
             return "mesh"
         try:
-            from simulation.BulletSimulation import _detect_freecad_shape_type
+            from ..simulation.BulletSimulation import _detect_freecad_shape_type
             return _detect_freecad_shape_type(self._rb_list[row].OriginalObject.Shape)
         except Exception:
             return "mesh"
@@ -241,7 +241,7 @@ class BodyTablePanel:
         """Refresh the resolution cell text after a shape type change."""
         from PySide import QtCore, QtWidgets
 
-        from objects.BulletWorld import find_world
+        from .BulletWorld import find_world
 
         world     = find_world()
         world_res = getattr(world, "MeshResolution", 1.0) if world else 1.0
@@ -377,7 +377,7 @@ class BodyTablePanel:
             val = max(0.0, float(self.inp_meshres.text()))
         except ValueError:
             return
-        from objects.BulletWorld import find_world
+        from .BulletWorld import find_world
         world     = find_world()
         world_res = getattr(world, "MeshResolution", 1.0) if world else 1.0
 
@@ -424,8 +424,8 @@ class BulletBodyTableViewProvider:
 
     def getIcon(self):
         import os
-        import BulletUtils
-        return os.path.join(BulletUtils.MOD_PATH, "icons", "BulletBodyTable.svg")
+        from .. import BulletUtils
+        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "BulletBodyTable.svg")
 
     def setEdit(self, vobj, mode):
         import FreeCADGui

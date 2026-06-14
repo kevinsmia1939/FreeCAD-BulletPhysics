@@ -40,8 +40,8 @@ class BulletContainerViewProvider:
 
     def getIcon(self):
         import os
-        import BulletUtils
-        return os.path.join(BulletUtils.MOD_PATH, "icons", "BulletContainer.svg")
+        from .. import BulletUtils
+        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "BulletContainer.svg")
 
     def claimChildren(self):
         obj = self.Object
@@ -102,8 +102,8 @@ def make_container(doc=None):
     if doc is None:
         doc = FreeCAD.ActiveDocument
 
-    from objects.BulletWorld import BulletWorldFeature, BulletWorldViewProvider
-    from objects.BulletBodyTable import make_body_table
+    from .BulletWorld import BulletWorldFeature, BulletWorldViewProvider
+    from .BulletBodyTable import make_body_table
 
     # Container
     container = doc.addObject("App::FeaturePython", "BulletPhysics")

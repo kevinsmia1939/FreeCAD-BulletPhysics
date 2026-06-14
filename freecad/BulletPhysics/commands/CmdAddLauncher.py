@@ -5,7 +5,7 @@ from PySide.QtWidgets import QMessageBox
 
 
 def _mod_path():
-    import BulletUtils
+    from .. import BulletUtils
     return BulletUtils.MOD_PATH
 
 
@@ -24,7 +24,7 @@ class AddLauncherCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "icons", "BulletLauncher.svg"),
+            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "BulletLauncher.svg"),
             "MenuText": "Add Velocity Launcher",
             "ToolTip": (
                 "Add a Velocity Launcher to the selected active rigid body.\n"
@@ -39,8 +39,8 @@ class AddLauncherCommand:
                 and len(_selected_active_rigid_bodies()) > 0)
 
     def Activated(self):
-        from objects.BulletContainer import find_container
-        from objects.BulletLauncher import make_launcher
+        from ..objects.BulletContainer import find_container
+        from ..objects.BulletLauncher import make_launcher
 
         rbs = _selected_active_rigid_bodies()
         if not rbs:

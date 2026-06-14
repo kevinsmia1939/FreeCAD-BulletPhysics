@@ -1,22 +1,25 @@
-class BulletPhysicsWorkbench(Workbench):
+import FreeCADGui
+
+
+class BulletPhysicsWorkbench(FreeCADGui.Workbench):
     MenuText = "Bullet Physics"
     ToolTip = "Bullet Physics rigid body simulation"
 
     def __init__(self):
         import os
-        import BulletUtils
-        icons_path = os.path.join(BulletUtils.MOD_PATH, "icons")
+        from . import BulletUtils
+        icons_path = os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons")
         self.__class__.Icon = os.path.join(icons_path, "BulletPhysics.svg")
         FreeCADGui.addIconPath(icons_path)
-        from preferences.BulletPreferences import BulletPreferencesPage
+        from .preferences.BulletPreferences import BulletPreferencesPage
         FreeCADGui.addPreferencePage(BulletPreferencesPage, "Bullet Physics")
 
     def Initialize(self):
-        import commands.CmdCreateContainer
-        import commands.CmdAddRigidBody
-        import commands.CmdAddLauncher
-        import commands.CmdDowngrade
-        import commands.CmdRunSimulation
+        from .commands import CmdCreateContainer
+        from .commands import CmdAddRigidBody
+        from .commands import CmdAddLauncher
+        from .commands import CmdDowngrade
+        from .commands import CmdRunSimulation
 
         tool_list = [
             "BulletPhysics_CreateContainer",

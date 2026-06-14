@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "freecad-bulletphysics"
+version = "1.0.0"
+description = "Rigid-body physics simulation workbench for FreeCAD powered by pybullet."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Kavin Teenakul", email = "andythe_great@protonmail.com" },
+]
+dependencies = [
+    "pybullet",
+]
+
+[tool.setuptools.packages.find]
+include = ["freecad.BulletPhysics*"]
+namespaces = true

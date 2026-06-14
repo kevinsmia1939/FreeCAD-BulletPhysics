@@ -6,9 +6,9 @@ from PySide.QtWidgets import QMessageBox
 
 def _button_down_icon():
     import os
-    import BulletUtils
+    from .. import BulletUtils
 
-    return os.path.join(BulletUtils.MOD_PATH, "icons", "button_down.svg")
+    return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "button_down.svg")
 
 
 def _has_shape(obj):

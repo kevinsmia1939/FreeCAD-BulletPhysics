@@ -64,12 +64,12 @@ class RigidBodyViewProvider:
 
     def getIcon(self):
         import os
-        import BulletUtils
+        from .. import BulletUtils
         obj = self.Object
         name = ("AddPassiveBody.svg"
                 if hasattr(obj, "BodyType") and obj.BodyType == "Passive"
                 else "AddActiveBody.svg")
-        return os.path.join(BulletUtils.MOD_PATH, "icons", name)
+        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", name)
 
     def claimChildren(self):
         obj = self.Object

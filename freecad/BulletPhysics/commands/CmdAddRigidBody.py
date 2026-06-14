@@ -5,7 +5,7 @@ from PySide.QtWidgets import QMessageBox
 
 
 def _mod_path():
-    import BulletUtils
+    from .. import BulletUtils
     return BulletUtils.MOD_PATH
 
 
@@ -19,7 +19,7 @@ def _selection_has_shapes():
 
 def _require_container():
     """Return the container or show an error and return None."""
-    from objects.BulletContainer import find_container
+    from ..objects.BulletContainer import find_container
     c = find_container()
     if c is None:
         QMessageBox.warning(
@@ -35,7 +35,7 @@ class AddActiveBodyCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "icons", "AddActiveBody.svg"),
+            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "AddActiveBody.svg"),
             "MenuText": "Add Active Rigid Body",
             "ToolTip": (
                 "Mark the selected solid as an active rigid body.\n"
@@ -48,7 +48,7 @@ class AddActiveBodyCommand:
         return FreeCAD.ActiveDocument is not None and _selection_has_shapes()
 
     def Activated(self):
-        from objects.RigidBody import make_rigid_body
+        from ..objects.RigidBody import make_rigid_body
         container = _require_container()
         if container is None:
             return
@@ -65,7 +65,7 @@ class AddPassiveBodyCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "icons", "AddPassiveBody.svg"),
+            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "AddPassiveBody.svg"),
             "MenuText": "Add Passive Rigid Body",
             "ToolTip": (
                 "Mark the selected solid as a passive (static) rigid body.\n"
@@ -78,7 +78,7 @@ class AddPassiveBodyCommand:
         return FreeCAD.ActiveDocument is not None and _selection_has_shapes()
 
     def Activated(self):
-        from objects.RigidBody import make_rigid_body
+        from ..objects.RigidBody import make_rigid_body
         container = _require_container()
         if container is None:
             return
