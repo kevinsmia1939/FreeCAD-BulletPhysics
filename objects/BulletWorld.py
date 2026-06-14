@@ -114,10 +114,7 @@ class WorldSettingsPanel:
     """Task panel exposing all BulletWorld properties as editable fields."""
 
     def __init__(self, world_obj):
-        try:
-            from PySide2 import QtWidgets
-        except ImportError:
-            from PySide import QtWidgets
+        from PySide import QtWidgets
 
         self._obj = world_obj
 

@@ -1,10 +1,7 @@
 import FreeCAD
 import FreeCADGui
 
-try:
-    from PySide2.QtWidgets import QMessageBox
-except ImportError:
-    from PySide.QtWidgets import QMessageBox
+from PySide.QtWidgets import QMessageBox
 
 
 def _mod_path():

@@ -2,20 +2,12 @@ import os
 import sys
 import FreeCAD
 
-try:
-    from PySide2.QtWidgets import (
-        QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-        QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy,
-    )
-    from PySide2.QtCore import Qt
-    from PySide2.QtGui import QColor, QPalette
-except ImportError:
-    from PySide.QtWidgets import (
-        QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-        QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy,
-    )
-    from PySide.QtCore import Qt
-    from PySide.QtGui import QColor, QPalette
+from PySide.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy,
+)
+from PySide.QtCore import Qt
+from PySide.QtGui import QColor, QPalette
 
 
 def _prefs():

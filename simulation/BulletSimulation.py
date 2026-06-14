@@ -1019,15 +1019,10 @@ def cleanup_stale_mesh_displays(doc=None):
 
 
 def _show_install_error():
-    try:
-        from PySide2.QtWidgets import QMessageBox
-    except ImportError:
-        from PySide.QtWidgets import QMessageBox
+    from PySide.QtWidgets import QMessageBox
+
     QMessageBox.critical(
         None,
-        "pybullet not installed",
-        "pybullet is required.\n\n"
-        "  CFLAGS='-Wno-error=return-type' \\\n"
-        "  CXXFLAGS='-Wno-error=return-type' \\\n"
-        "  python3 -m pip install pybullet --break-system-packages",
+        "pybullet not installed, pybullet is required.\n",
+        "See instructions: github.com/kevinsmia1939/FreeCAD-BulletPhysics",
     )

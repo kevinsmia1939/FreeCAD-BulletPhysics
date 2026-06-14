@@ -41,10 +41,7 @@ class BodyTablePanel:
     _SHAPE_OPTIONS = ["Auto", "box", "sphere", "cylinder", "convex_hull", "mesh"]
 
     def __init__(self):
-        try:
-            from PySide2 import QtCore, QtWidgets
-        except ImportError:
-            from PySide import QtCore, QtWidgets
+        from PySide import QtCore, QtWidgets
 
         self._rb_list  = []
         self._updating = False
@@ -149,10 +146,7 @@ class BodyTablePanel:
     # ── Populate ────────────────────────────────────────────────────────────
 
     def _populate(self):
-        try:
-            from PySide2 import QtCore, QtWidgets
-        except ImportError:
-            from PySide import QtCore, QtWidgets
+        from PySide import QtCore, QtWidgets
 
         from simulation.BulletSimulation import (
             collect_rigid_bodies, _detect_freecad_shape_type)
@@ -245,10 +239,7 @@ class BodyTablePanel:
 
     def _update_res_cell(self, row):
         """Refresh the resolution cell text after a shape type change."""
-        try:
-            from PySide2 import QtCore, QtWidgets
-        except ImportError:
-            from PySide import QtCore, QtWidgets
+        from PySide import QtCore, QtWidgets
 
         from objects.BulletWorld import find_world
 

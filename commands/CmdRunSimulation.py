@@ -2,10 +2,7 @@ import os
 import FreeCAD
 import FreeCADGui
 
-try:
-    from PySide2 import QtCore, QtWidgets
-except ImportError:
-    from PySide import QtCore, QtWidgets
+from PySide import QtCore, QtWidgets
 
 
 def _mod_path():
