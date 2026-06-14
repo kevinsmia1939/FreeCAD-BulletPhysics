@@ -19,3 +19,6 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["freecad.BulletPhysics*"]
 namespaces = true
+
+[tool.setuptools.package-data]
+"freecad.BulletPhysics" = ["Resources/Icons/*.svg"]

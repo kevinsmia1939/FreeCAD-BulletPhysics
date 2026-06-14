@@ -10,6 +10,11 @@ def _mod_path():
     return BulletUtils.MOD_PATH
 
 
+def _icons_path():
+    from .. import BulletUtils
+    return BulletUtils.ICONS_PATH
+
+
 # ---------------------------------------------------------------------------
 # Playback panel
 # ---------------------------------------------------------------------------
@@ -588,7 +593,7 @@ class SimulationPanel:
 class RunSimulationCommand:
     def GetResources(self):
         return {
-            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "RunSimulation.svg"),
+            "Pixmap": os.path.join(_icons_path(), "RunSimulation.svg"),
             "MenuText": "Run Simulation",
             "ToolTip": "Simulate and play back with timeline. Settings from Physics World.",
         }

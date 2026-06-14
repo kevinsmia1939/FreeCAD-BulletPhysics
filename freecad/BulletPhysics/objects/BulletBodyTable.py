@@ -425,7 +425,7 @@ class BulletBodyTableViewProvider:
     def getIcon(self):
         import os
         from .. import BulletUtils
-        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "BulletBodyTable.svg")
+        return os.path.join(BulletUtils.ICONS_PATH, "BulletBodyTable.svg")
 
     def setEdit(self, vobj, mode):
         import FreeCADGui

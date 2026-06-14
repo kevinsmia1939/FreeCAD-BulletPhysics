@@ -290,7 +290,7 @@ class BulletWorldViewProvider:
     def getIcon(self):
         import os
         from .. import BulletUtils
-        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "BulletWorld.svg")
+        return os.path.join(BulletUtils.ICONS_PATH, "BulletWorld.svg")
 
     def setEdit(self, vobj, mode):
         import FreeCADGui

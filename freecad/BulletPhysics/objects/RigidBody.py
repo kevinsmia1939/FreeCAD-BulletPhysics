@@ -69,7 +69,7 @@ class RigidBodyViewProvider:
         name = ("AddPassiveBody.svg"
                 if hasattr(obj, "BodyType") and obj.BodyType == "Passive"
                 else "AddActiveBody.svg")
-        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", name)
+        return os.path.join(BulletUtils.ICONS_PATH, name)
 
     def claimChildren(self):
         obj = self.Object

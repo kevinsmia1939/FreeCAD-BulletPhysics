@@ -41,7 +41,7 @@ class BulletContainerViewProvider:
     def getIcon(self):
         import os
         from .. import BulletUtils
-        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "BulletContainer.svg")
+        return os.path.join(BulletUtils.ICONS_PATH, "BulletContainer.svg")
 
     def claimChildren(self):
         obj = self.Object

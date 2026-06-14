@@ -8,7 +8,7 @@ def _button_down_icon():
     import os
     from .. import BulletUtils
 
-    return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "button_down.svg")
+    return os.path.join(BulletUtils.ICONS_PATH, "button_down.svg")
 
 
 def _has_shape(obj):

@@ -7,11 +7,16 @@ def _mod_path():
     return BulletUtils.MOD_PATH
 
 
+def _icons_path():
+    from .. import BulletUtils
+    return BulletUtils.ICONS_PATH
+
+
 class CreateContainerCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "BulletContainer.svg"),
+            "Pixmap": os.path.join(_icons_path(), "BulletContainer.svg"),
             "MenuText": "Create Physics Container",
             "ToolTip": (
                 "Create a Bullet Physics container with a Physics World object.\n"

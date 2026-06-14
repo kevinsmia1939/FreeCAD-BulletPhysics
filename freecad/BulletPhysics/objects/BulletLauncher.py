@@ -47,7 +47,7 @@ class BulletLauncherViewProvider:
     def getIcon(self):
         import os
         from .. import BulletUtils
-        return os.path.join(BulletUtils.MOD_PATH, "Resources", "Icons", "BulletLauncher.svg")
+        return os.path.join(BulletUtils.ICONS_PATH, "BulletLauncher.svg")
 
     def __getstate__(self):
         return None

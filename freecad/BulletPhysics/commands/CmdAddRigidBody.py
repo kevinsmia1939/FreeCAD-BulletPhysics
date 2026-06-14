@@ -9,6 +9,11 @@ def _mod_path():
     return BulletUtils.MOD_PATH
 
 
+def _icons_path():
+    from .. import BulletUtils
+    return BulletUtils.ICONS_PATH
+
+
 def _has_shape(obj):
     return hasattr(obj, "Shape") and obj.Shape is not None
 
@@ -35,7 +40,7 @@ class AddActiveBodyCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "AddActiveBody.svg"),
+            "Pixmap": os.path.join(_icons_path(), "AddActiveBody.svg"),
             "MenuText": "Add Active Rigid Body",
             "ToolTip": (
                 "Mark the selected solid as an active rigid body.\n"
@@ -65,7 +70,7 @@ class AddPassiveBodyCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "AddPassiveBody.svg"),
+            "Pixmap": os.path.join(_icons_path(), "AddPassiveBody.svg"),
             "MenuText": "Add Passive Rigid Body",
             "ToolTip": (
                 "Mark the selected solid as a passive (static) rigid body.\n"

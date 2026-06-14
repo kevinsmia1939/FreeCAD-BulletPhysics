@@ -36,11 +36,11 @@
         file = 'LICENSE'
     >GPL-3.0-or-later</license>
 
-    <icon>Resources/Icons/BulletPhysics.svg</icon>
+    <icon>freecad/BulletPhysics/Resources/Icons/BulletPhysics.svg</icon>
 
     <url
         type = 'documentation'
-    >https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/blob/main/README.md</url>
+    >https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/tree/main/Documentation</url>
 
     <url
         branch = 'main'
@@ -53,7 +53,7 @@
 
     <url
         type = 'readme'
-    >https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/raw/main/README.md</url>
+    >https://raw.githubusercontent.com/kevinsmia1939/FreeCAD-BulletPhysics/refs/heads/main/README.md</url>
 
     <content>
         <workbench>

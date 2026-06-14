@@ -9,6 +9,11 @@ def _mod_path():
     return BulletUtils.MOD_PATH
 
 
+def _icons_path():
+    from .. import BulletUtils
+    return BulletUtils.ICONS_PATH
+
+
 def _selected_active_rigid_bodies():
     """Return selected RigidBody objects whose BodyType is Active."""
     result = []
@@ -24,7 +29,7 @@ class AddLauncherCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_mod_path(), "Resources", "Icons", "BulletLauncher.svg"),
+            "Pixmap": os.path.join(_icons_path(), "BulletLauncher.svg"),
             "MenuText": "Add Velocity Launcher",
             "ToolTip": (
                 "Add a Velocity Launcher to the selected active rigid body.\n"
