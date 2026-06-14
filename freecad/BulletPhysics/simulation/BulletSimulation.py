@@ -1024,5 +1024,5 @@ def _show_install_error():
     QMessageBox.critical(
         None,
         "pybullet not installed, pybullet is required.\n",
-        "See instructions: github.com/kevinsmia1939/FreeCAD-BulletPhysics",
+        "See instructions: github.com/kevinsmia1939/BulletPhysics",
     )

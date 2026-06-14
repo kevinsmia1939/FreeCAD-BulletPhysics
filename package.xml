@@ -40,20 +40,20 @@
 
     <url
         type = 'documentation'
-    >https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/tree/main/Documentation</url>
+    >https://github.com/kevinsmia1939/BulletPhysics/tree/main/Documentation</url>
 
     <url
         branch = 'main'
         type = 'repository'
-    >https://github.com/kevinsmia1939/FreeCAD-BulletPhysics</url>
+    >https://github.com/kevinsmia1939/BulletPhysics</url>
 
     <url
         type = 'bugtracker'
-    >https://github.com/kevinsmia1939/FreeCAD-BulletPhysics/issues</url>
+    >https://github.com/kevinsmia1939/BulletPhysics/issues</url>
 
     <url
         type = 'readme'
-    >https://raw.githubusercontent.com/kevinsmia1939/FreeCAD-BulletPhysics/refs/heads/main/README.md</url>
+    >https://raw.githubusercontent.com/kevinsmia1939/BulletPhysics/refs/heads/main/README.md</url>
 
     <content>
         <workbench>
