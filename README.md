@@ -71,11 +71,11 @@ Clone this repository into your FreeCAD `Mod` folder:
 # Linux / macOS
 cd ~/.local/share/FreeCAD/Mod        # FreeCAD 1.x path
 # or ~/.FreeCAD/Mod for older versions
-git clone https://github.com/kevinsmia1939/BulletPhysics
+git clone https://github.com/kevinsmia1939/FreeCAD-BulletPhysics
 
 # Windows
 cd %APPDATA%\FreeCAD\Mod
-git clone https://github.com/kevinsmia1939/BulletPhysics
+git clone https://github.com/kevinsmia1939/FreeCAD-BulletPhysics
 ```
 
 Restart FreeCAD and select **Bullet Physics** from the workbench dropdown.
