@@ -17,6 +17,7 @@ class BulletPhysicsWorkbench(FreeCADGui.Workbench):
         from .commands import CmdCreateContainer
         from .commands import CmdAddRigidBody
         from .commands import CmdAddLauncher
+        from .commands import CmdAddEmitter
         from .commands import CmdDowngrade
         from .commands import CmdRunSimulation
 
@@ -29,6 +30,8 @@ class BulletPhysicsWorkbench(FreeCADGui.Workbench):
             "BulletPhysics_Downgrade",
             "Separator",
             "BulletPhysics_AddLauncher",
+            "Separator",
+            "BulletPhysics_AddEmitter",
             "Separator",
             "BulletPhysics_RunSimulation",
         ]

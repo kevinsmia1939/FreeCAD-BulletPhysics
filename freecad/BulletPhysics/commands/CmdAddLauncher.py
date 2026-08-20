@@ -15,12 +15,13 @@ def _icons_path():
 
 
 def _selected_active_rigid_bodies():
-    """Return selected RigidBody objects whose BodyType is Active."""
+    """Return selected enabled RigidBody objects whose BodyType is Active."""
     result = []
     for obj in FreeCADGui.Selection.getSelection():
         if (hasattr(obj, "Proxy")
                 and type(obj.Proxy).__name__ == "RigidBodyFeature"
-                and getattr(obj, "BodyType", None) == "Active"):
+                and getattr(obj, "BodyType", None) == "Active"
+                and getattr(obj, "Enabled", True)):
             result.append(obj)
     return result
 

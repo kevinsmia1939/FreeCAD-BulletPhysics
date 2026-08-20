@@ -1,4 +1,5 @@
 import FreeCAD
+import random
 
 MM_TO_M = 0.001
 M_TO_MM = 1000.0
@@ -8,8 +9,8 @@ M_TO_MM = 1000.0
 # Document-object helpers
 # ---------------------------------------------------------------------------
 
-def collect_rigid_bodies(doc=None):
-    """Return all BulletRigidBody objects that have a valid BodyLink."""
+def collect_rigid_bodies(doc=None, enabled_only=True):
+    """Return valid rigid bodies, optionally excluding disabled bodies."""
     if doc is None:
         doc = FreeCAD.ActiveDocument
     result = []
@@ -20,13 +21,14 @@ def collect_rigid_bodies(doc=None):
                 and obj.BodyLink is not None
                 and hasattr(obj, "OriginalObject")
                 and obj.OriginalObject is not None
-                and hasattr(obj.OriginalObject, "Shape")):
+                and hasattr(obj.OriginalObject, "Shape")
+                and (not enabled_only or getattr(obj, "Enabled", True))):
             result.append(obj)
     return result
 
 
 def collect_launchers(doc=None):
-    """Return all BulletLauncher objects that have a valid TargetBody."""
+    """Return launchers whose target body is enabled for simulation."""
     if doc is None:
         doc = FreeCAD.ActiveDocument
     result = []
@@ -34,9 +36,142 @@ def collect_launchers(doc=None):
         if (hasattr(obj, "Proxy")
                 and type(obj.Proxy).__name__ == "BulletLauncherFeature"
                 and hasattr(obj, "TargetBody")
-                and obj.TargetBody is not None):
+                and obj.TargetBody is not None
+                and getattr(obj.TargetBody, "Enabled", True)):
             result.append(obj)
     return result
+
+
+def collect_emitters(doc=None, enabled_only=True):
+    """Return valid emitters, optionally excluding disabled emitters."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    result = []
+    for obj in doc.Objects:
+        source = getattr(obj, "EmissionSource", None)
+        template = getattr(obj, "TemplateObject", None)
+        if (hasattr(obj, "Proxy")
+                and type(obj.Proxy).__name__ == "BulletEmitterFeature"
+                and (not enabled_only or getattr(obj, "Enabled", True))
+                and source is not None
+                and template is not None
+                and hasattr(source, "Shape")
+                and source.Shape is not None
+                and hasattr(template, "Shape")
+                and template.Shape is not None):
+            result.append(obj)
+    return result
+
+
+def _all_emitters(doc=None):
+    """Return every emitter feature, including incomplete or disabled ones."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    return [obj for obj in doc.Objects
+            if (hasattr(obj, "Proxy")
+                and type(obj.Proxy).__name__ == "BulletEmitterFeature")]
+
+
+def _emitter_links(doc):
+    links = []
+    for emitter in _all_emitters(doc):
+        links.extend(link for link in getattr(emitter, "GeneratedLinks", [])
+                     if link is not None)
+    return links
+
+
+def _clear_emitter_links(doc, emitters):
+    for emitter in emitters:
+        for link in list(getattr(emitter, "GeneratedLinks", [])):
+            if link is not None:
+                doc.removeObject(link.Name)
+        emitter.GeneratedLinks = []
+    doc.recompute()
+
+
+def _make_emitter_links(doc, emitters):
+    """Create hidden playback links for every scheduled emission."""
+    result = {}
+    for emitter in emitters:
+        links = []
+        template = emitter.TemplateObject
+        count = max(1, int(getattr(emitter, "Count", 1)))
+        for index in range(count):
+            link = doc.addObject("App::Link", f"_BtEmit_{emitter.Name}_{index + 1}")
+            link.setLink(template)
+            link.Label = f"Emission {index + 1}: {template.Label}"
+            if FreeCAD.GuiUp:
+                link.ViewObject.Visibility = False
+            links.append(link)
+        emitter.GeneratedLinks = links
+        result[emitter.Name] = links
+    doc.recompute()
+    return result
+
+
+def _sample_emission_point(shape, rng):
+    """Return a random world-space point in a solid, or on a surface shape."""
+    bb = shape.BoundBox
+    if getattr(shape, "Volume", 0.0) > 1e-9:
+        for _ in range(128):
+            point = FreeCAD.Vector(
+                rng.uniform(bb.XMin, bb.XMax),
+                rng.uniform(bb.YMin, bb.YMax),
+                rng.uniform(bb.ZMin, bb.ZMax),
+            )
+            try:
+                if shape.isInside(point, 1e-7, True):
+                    return point
+            except Exception:
+                break
+
+    try:
+        vertices, triangles = shape.tessellate(1.0)
+        weighted = []
+        total_area = 0.0
+        for triangle in triangles:
+            a, b, c = (vertices[index] for index in triangle)
+            area = (b - a).cross(c - a).Length * 0.5
+            if area > 1e-12:
+                total_area += area
+                weighted.append((total_area, a, b, c))
+        if weighted:
+            target = rng.uniform(0.0, total_area)
+            _, a, b, c = next(entry for entry in weighted if entry[0] >= target)
+            u = rng.random()
+            v = rng.random()
+            if u + v > 1.0:
+                u, v = 1.0 - u, 1.0 - v
+            return a + (b - a) * u + (c - a) * v
+    except Exception:
+        pass
+
+    return FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+
+
+def _emitter_rotation(emitter, rng):
+    orientation = getattr(emitter, "Orientation", FreeCAD.Vector())
+    randomness = getattr(emitter, "OrientationRandomness", FreeCAD.Vector())
+    variation = [max(0.0, min(1.0, value)) * 180.0
+                 for value in (randomness.x, randomness.y, randomness.z)]
+    return FreeCAD.Rotation(
+        orientation.x + rng.uniform(-variation[0], variation[0]),
+        orientation.y + rng.uniform(-variation[1], variation[1]),
+        orientation.z + rng.uniform(-variation[2], variation[2]),
+    )
+
+
+def _emitter_schedule(emitters, time_step):
+    schedule = {}
+    for emitter in emitters:
+        count = max(1, int(getattr(emitter, "Count", 1)))
+        start = max(0.0, getattr(emitter, "StartTime", 0.0))
+        end = max(start, getattr(emitter, "EndTime", start))
+        for index in range(count):
+            time = start if count == 1 else start + (end - start) * index / (count - 1)
+            schedule.setdefault(max(0, int(round(time / time_step))), []).append(
+                (emitter, index))
+    return schedule
 
 
 def apply_frame(frame, doc=None):
@@ -49,10 +184,24 @@ def apply_frame(frame, doc=None):
     import FreeCADGui
     if doc is None:
         doc = FreeCAD.ActiveDocument
+    disabled_links = {
+        rb.BodyLink.Name
+        for rb in collect_rigid_bodies(doc, enabled_only=False)
+        if not getattr(rb, "Enabled", True)
+    }
+    emitted_links = _emitter_links(doc)
+    emitted_names = {link.Name for link in emitted_links}
+    for link in emitted_links:
+        if link.Name not in frame:
+            link.ViewObject.Visibility = False
     for link_name, placement in frame.items():
+        if link_name in disabled_links:
+            continue
         obj = doc.getObject(link_name)
         if obj is not None:
             obj.Placement = placement
+            if link_name in emitted_names:
+                obj.ViewObject.Visibility = True
     FreeCADGui.updateGui()
 
 
@@ -399,10 +548,12 @@ def run_simulation(callback=None):
     from ..objects.BulletWorld import find_world
 
     rigid_bodies = collect_rigid_bodies()
-    if not rigid_bodies:
+    all_emitters = _all_emitters()
+    emitters = collect_emitters(enabled_only=True)
+    if not rigid_bodies and not emitters:
         FreeCAD.Console.PrintWarning(
-            "BulletPhysics: No rigid body objects found.\n"
-            "Add Active/Passive rigid bodies inside a Physics Container first.\n"
+            "BulletPhysics: No enabled rigid bodies or emitters found.\n"
+            "Add Active/Passive rigid bodies or configure an emitter first.\n"
         )
         return None
 
@@ -473,10 +624,87 @@ def run_simulation(callback=None):
     launcher_by_rb = {ln.TargetBody.Name: ln for ln in launchers
                       if ln.TargetBody is not None}
 
-    # {bullet_id: (rb_doc_obj, link_obj, local_offset_mm)}
+    _clear_emitter_links(FreeCAD.ActiveDocument, all_emitters)
+    emitter_links = _make_emitter_links(FreeCAD.ActiveDocument, emitters)
+
+    # {bullet_id: (body_config_obj, link_obj, local_offset_mm, is_emitted)}
     body_map = {}
     # {bullet_id: (fire_step, vel_x, vel_y, vel_z, actual_mass)}
     launch_map = {}
+
+    emitter_configs = {}
+    rng = random.Random()
+
+    for emitter in emitters:
+        template = emitter.TemplateObject
+        template_shape = template.Shape
+        template_pl = template.Placement
+        bb = template_shape.BoundBox
+        template_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+        half_mm = _local_half_extents(template_shape, template_pl)
+        half = [value * MM_TO_M for value in half_mm]
+        is_static = emitter.BodyType == "Passive"
+        col, characteristic_radius = _make_collision_shape(
+            p, template_shape, half, template_pl, template_center, client,
+            is_static=is_static, mesh_resolution=mesh_resolution,
+            collision_margin=collision_margin)
+        local_offset = template_pl.Rotation.inverted().multVec(
+            template_center - template_pl.Base)
+        density = max(0.0, getattr(emitter, "Density", 1000.0))
+        mass = 0.0 if is_static else density * template_shape.Volume * 1e-9
+        emitter_configs[emitter.Name] = (
+            col, characteristic_radius, mass, local_offset,
+            max(0.0, getattr(emitter, "Restitution", 0.3)),
+            max(0.0, getattr(emitter, "Friction", 0.5)),
+        )
+
+    emission_schedule = _emitter_schedule(emitters, time_step)
+
+    def spawn_emission(emitter, index):
+        link = emitter_links[emitter.Name][index]
+        (col, characteristic_radius, mass, local_offset,
+         restitution, friction) = emitter_configs[emitter.Name]
+        center = _sample_emission_point(emitter.EmissionSource.Shape, rng)
+        rotation = _emitter_rotation(emitter, rng)
+        body_id = p.createMultiBody(
+            baseMass=mass,
+            baseCollisionShapeIndex=col,
+            basePosition=[center.x * MM_TO_M, center.y * MM_TO_M, center.z * MM_TO_M],
+            baseOrientation=rotation.Q,
+            physicsClientId=client,
+        )
+        p.changeDynamics(
+            body_id, -1,
+            restitution=restitution,
+            lateralFriction=friction,
+            collisionMargin=collision_margin,
+            physicsClientId=client,
+        )
+        if mass > 0:
+            p.changeDynamics(
+                body_id, -1,
+                ccdSweptSphereRadius=characteristic_radius * 0.4,
+                activationState=4,
+                linearDamping=linear_damping,
+                angularDamping=angular_damping,
+                physicsClientId=client,
+            )
+            direction = getattr(emitter, "Direction", FreeCAD.Vector(0, 0, 1))
+            length = (direction.x**2 + direction.y**2 + direction.z**2) ** 0.5
+            if length > 1e-9:
+                speed = max(0.0, getattr(emitter, "Velocity", 0.0))
+                p.resetBaseVelocity(
+                    body_id,
+                    linearVelocity=[direction.x / length * speed,
+                                    direction.y / length * speed,
+                                    direction.z / length * speed],
+                    physicsClientId=client,
+                )
+        base = center - rotation.multVec(local_offset)
+        link.Placement = FreeCAD.Placement(base, rotation)
+        if FreeCAD.GuiUp:
+            link.ViewObject.Visibility = True
+        body_map[body_id] = (emitter, link, local_offset, True)
 
     try:
         for rb in rigid_bodies:
@@ -581,11 +809,14 @@ def run_simulation(callback=None):
             local_offset = orig_pl.Rotation.inverted().multVec(
                 world_center - orig_pl.Base)
 
-            body_map[body_id] = (rb, link, local_offset)
+            body_map[body_id] = (rb, link, local_offset, False)
+
+        for emitter, index in emission_schedule.get(0, []):
+            spawn_emission(emitter, index)
 
         # Frame 0 — initial placements of all Links (before any stepping)
         initial_frame = {}
-        for _, (rb, link, _) in body_map.items():
+        for _, (rb, link, _, _) in body_map.items():
             initial_frame[link.Name] = link.Placement.copy()
         frames = [initial_frame]
 
@@ -593,6 +824,10 @@ def run_simulation(callback=None):
 
         # Simulation loop — each recorded frame runs sub_steps Bullet ticks
         for step in range(steps):
+            if step > 0:
+                for emitter, index in emission_schedule.get(step, []):
+                    spawn_emission(emitter, index)
+
             # Fire any launchers whose time has come (before stepping this frame)
             for body_id, (fire_step, vx, vy, vz, actual_mass, char_r) in launch_map.items():
                 if step == fire_step and body_id not in fired_launchers:
@@ -617,8 +852,10 @@ def run_simulation(callback=None):
                 p.stepSimulation(physicsClientId=client)
 
             frame = {}
-            for body_id, (rb, link, local_offset) in body_map.items():
+            for body_id, (rb, link, local_offset, is_emitted) in body_map.items():
                 if rb.BodyType == "Passive":
+                    if is_emitted:
+                        frame[link.Name] = link.Placement.copy()
                     continue
                 pos, orn = p.getBasePositionAndOrientation(
                     body_id, physicsClientId=client)

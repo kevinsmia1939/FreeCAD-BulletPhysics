@@ -434,8 +434,11 @@ class SimulationPanel:
             except Exception:
                 pass
         FreeCADGui.updateGui()
-        # Sync slider back to frame 0 without re-applying a recorded frame
+        # Re-apply frame 0 so delayed emitter links are hidden again while
+        # emissions scheduled at time zero remain visible.
         if self.frames:
+            from ..simulation.BulletSimulation import apply_frame
+            apply_frame(self.frames[0])
             self.slider.blockSignals(True)
             self.slider.setValue(0)
             self.slider.blockSignals(False)

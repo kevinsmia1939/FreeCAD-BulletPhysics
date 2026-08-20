@@ -15,6 +15,9 @@ class RigidBodyFeature:
         obj.addProperty("App::PropertyEnumeration", "BodyType", "RigidBody",
                         "Active: moved by physics.  Passive: static collider.")
         obj.BodyType = ["Active", "Passive"]
+        obj.addProperty("App::PropertyBool", "Enabled", "RigidBody",
+                        "Include this body in Bullet Physics simulations")
+        obj.Enabled = True
         obj.addProperty("App::PropertyFloat", "Density", "RigidBody",
                         "Material density in kg/m³. Mass is computed automatically "
                         "as density × shape volume. Ignored for Passive bodies.")
@@ -39,6 +42,12 @@ class RigidBodyFeature:
 
     def execute(self, obj):
         pass
+
+    def onDocumentRestored(self, obj):
+        if not hasattr(obj, "Enabled"):
+            obj.addProperty("App::PropertyBool", "Enabled", "RigidBody",
+                            "Include this body in Bullet Physics simulations")
+            obj.Enabled = True
 
     def __getstate__(self):
         return None
@@ -96,11 +105,12 @@ class RigidBodyViewProvider:
         return None
 
 
-def make_rigid_body(original_obj, body_type="Active", container=None):
+def make_rigid_body(original_obj, body_type="Active", container=None, enabled=True):
     """
     Create an App::Link clone of *original_obj* and wrap it in a RigidBody
     feature.  The original is never modified.  Both are added to *container*
-    if provided.
+    if provided.  *enabled* permits future tools to create an inactive body
+    that is excluded from simulation until explicitly enabled.
     """
     doc = FreeCAD.ActiveDocument
 
@@ -116,6 +126,7 @@ def make_rigid_body(original_obj, body_type="Active", container=None):
     rb.OriginalObject = original_obj
     rb.BodyLink = link
     rb.BodyType = body_type
+    rb.Enabled = bool(enabled)
     rb.Label = f"RigidBody_{original_obj.Label}"
 
     if FreeCAD.GuiUp:

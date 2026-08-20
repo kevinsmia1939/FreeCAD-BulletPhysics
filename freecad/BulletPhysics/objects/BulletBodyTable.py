@@ -157,7 +157,9 @@ class BodyTablePanel:
             world     = find_world()
             world_res = getattr(world, "MeshResolution", 1.0) if world else 1.0
 
-            self._rb_list = collect_rigid_bodies()
+            # Show disabled bodies too so they can be re-enabled in the
+            # Property editor without disappearing from this management table.
+            self._rb_list = collect_rigid_bodies(enabled_only=False)
             self.table.setRowCount(len(self._rb_list))
 
             RO = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable

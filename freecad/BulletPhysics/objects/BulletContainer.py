@@ -11,10 +11,17 @@ class BulletContainerFeature:
                         "Rigid body objects managed by this simulation")
         obj.addProperty("App::PropertyLinkList", "Launchers", "Container",
                         "Velocity launcher objects managed by this simulation")
+        obj.addProperty("App::PropertyLinkList", "Emitters", "Container",
+                        "Rigid body emitter objects managed by this simulation")
         obj.Proxy = self
 
     def execute(self, obj):
         pass
+
+    def onDocumentRestored(self, obj):
+        if not hasattr(obj, "Emitters"):
+            obj.addProperty("App::PropertyLinkList", "Emitters", "Container",
+                            "Rigid body emitter objects managed by this simulation")
 
     def __getstate__(self):
         return None
@@ -54,6 +61,8 @@ class BulletContainerViewProvider:
             children.extend(rb for rb in obj.RigidBodies if rb is not None)
         if hasattr(obj, "Launchers"):
             children.extend(ln for ln in obj.Launchers if ln is not None)
+        if hasattr(obj, "Emitters"):
+            children.extend(emitter for emitter in obj.Emitters if emitter is not None)
         return children
 
     def onChanged(self, vobj, prop):
@@ -72,6 +81,13 @@ class BulletContainerViewProvider:
                     if rb is not None:
                         try:
                             rb.ViewObject.Visibility = visible
+                        except Exception:
+                            pass
+            if hasattr(obj, "Emitters"):
+                for emitter in obj.Emitters:
+                    if emitter is not None:
+                        try:
+                            emitter.ViewObject.Visibility = visible
                         except Exception:
                             pass
 
