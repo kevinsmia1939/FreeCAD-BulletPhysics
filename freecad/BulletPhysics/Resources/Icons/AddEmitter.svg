@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="emitterGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#75ddd0"/>
+      <stop offset="100%" stop-color="#168a82"/>
+    </linearGradient>
+  </defs>
+  <!-- Source region: this object configures emissions but is not a physics body. -->
+  <path d="M12 10h40v12L39 35v13l-7 7-7-7V35L12 22z"
+        fill="url(#emitterGrad)" stroke="#0c5d58" stroke-width="2.5"
+        stroke-linejoin="round"/>
+  <path d="M20 18h24" stroke="#d8fffa" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="24" cy="55" r="3" fill="#f2c14e"/>
+  <circle cx="32" cy="58" r="3" fill="#f2c14e"/>
+  <circle cx="40" cy="55" r="3" fill="#f2c14e"/>
+  <!-- Add badge -->
+  <circle cx="52" cy="12" r="10" fill="#2ecc40" stroke="white" stroke-width="1.5"/>
+  <path d="M52 7v10M47 12h10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

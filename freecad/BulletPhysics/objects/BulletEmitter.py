@@ -17,7 +17,7 @@ def _parse_vector(text, fallback):
 
 
 class BulletEmitterFeature:
-    """Configuration for spawning rigid-body copies from a source shape."""
+    """Non-physical configuration for spawning bodies from a source shape."""
 
     def __init__(self, obj):
         obj.addProperty("App::PropertyLink", "EmissionSource", "Emitter",
@@ -30,7 +30,7 @@ class BulletEmitterFeature:
                         "Include this emitter in Bullet Physics simulations")
         obj.Enabled = True
         obj.addProperty("App::PropertyEnumeration", "BodyType", "Emission",
-                        "Active bodies move; Passive bodies are static colliders")
+                        "Type assigned to each emitted body; the emitter is non-physical")
         obj.BodyType = ["Active", "Passive"]
         obj.addProperty("App::PropertyInteger", "Count", "Emission",
                         "Total number of bodies to emit")
@@ -91,7 +91,7 @@ class EmitterPanel:
 
         self._emitter = emitter
         self.form = QtWidgets.QWidget()
-        self.form.setWindowTitle("Rigid Body Emitter")
+        self.form.setWindowTitle("Emitter")
         layout = QtWidgets.QVBoxLayout(self.form)
 
         source_group = QtWidgets.QGroupBox("Objects")
@@ -121,7 +121,7 @@ class EmitterPanel:
         self.orientation_edit.setToolTip("Euler angles in degrees: X, Y, Z")
         self.randomness_edit.setToolTip("Per-axis values from 0 (none) to 1 (maximum)")
         emission_form.addRow(self.enabled_check)
-        emission_form.addRow("Body type:", self.type_combo)
+        emission_form.addRow("Emitted body type:", self.type_combo)
         emission_form.addRow("Count:", self.count_spin)
         emission_form.addRow("Start time (s):", self.start_spin)
         emission_form.addRow("End time (s):", self.end_spin)
@@ -238,7 +238,7 @@ class BulletEmitterViewProvider:
     def getIcon(self):
         import os
         from .. import BulletUtils
-        return os.path.join(BulletUtils.ICONS_PATH, "BulletLauncher.svg")
+        return os.path.join(BulletUtils.ICONS_PATH, "AddEmitter.svg")
 
     def claimChildren(self):
         return [link for link in getattr(self.Object, "GeneratedLinks", [])

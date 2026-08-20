@@ -18,11 +18,12 @@ class AddEmitterCommand:
     def GetResources(self):
         import os
         return {
-            "Pixmap": os.path.join(_icons_path(), "BulletLauncher.svg"),
-            "MenuText": "Add Rigid Body Emitter",
+            "Pixmap": os.path.join(_icons_path(), "AddEmitter.svg"),
+            "MenuText": "Add Emitter",
             "ToolTip": (
-                "Create a rigid body emitter from the selected volume or surface.\n"
-                "Double-click the emitter to choose the object to emit and set timing."
+                "Create an emitter from the selected volume or surface.\n"
+                "The emitter itself does not interact with the simulation; "
+                "it only creates the configured emitted bodies."
             ),
         }
 
@@ -43,7 +44,7 @@ class AddEmitterCommand:
             return
 
         doc = FreeCAD.ActiveDocument
-        doc.openTransaction("Add Rigid Body Emitter")
+        doc.openTransaction("Add Emitter")
         try:
             emitters = [make_emitter(source, container=container)
                         for source in source_objects]
