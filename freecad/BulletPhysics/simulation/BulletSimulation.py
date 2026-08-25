@@ -3,6 +3,14 @@ import random
 
 MM_TO_M = 0.001
 M_TO_MM = 1000.0
+_last_stop_reason = ""
+
+
+def _report_event(message):
+    """Write optional particle lifecycle events to FreeCAD's Report View."""
+    from ..preferences.BulletPreferences import get_event_reporting_enabled
+    if get_event_reporting_enabled():
+        FreeCAD.Console.PrintMessage(f"BulletPhysics: {message}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +569,12 @@ def _delete_rigid_body_definition(doc, rigid_body):
 # Simulation
 # ---------------------------------------------------------------------------
 
-def run_simulation(callback=None):
+def get_last_stop_reason():
+    """Return the reason the most recent simulation ended early, if any."""
+    return _last_stop_reason
+
+
+def run_simulation(callback=None, stop_on_contact=None):
     """
     Run the Bullet Physics simulation using settings from the BulletWorld object.
 
@@ -569,6 +582,9 @@ def run_simulation(callback=None):
     Each frame maps App::Link.Name → FreeCAD.Placement.
     Returns None on error.
     """
+    global _last_stop_reason
+    _last_stop_reason = ""
+
     try:
         import sys
         from ..preferences.BulletPreferences import get_pybullet_path
@@ -672,6 +688,7 @@ def run_simulation(callback=None):
     launch_map = {}
     # {bullet_id: DestroyRigidBodyFeature}
     destroy_trigger_ids = {}
+    stop_trigger_id = None
 
     for trigger in collect_destroy_bodies():
         source = trigger.SourceObject
@@ -695,6 +712,29 @@ def run_simulation(callback=None):
             physicsClientId=client,
         )
         destroy_trigger_ids[trigger_id] = trigger
+
+    if (stop_on_contact is not None
+            and hasattr(stop_on_contact, "Shape")
+            and stop_on_contact.Shape is not None):
+        shape = stop_on_contact.Shape
+        source_pl = stop_on_contact.Placement
+        bb = shape.BoundBox
+        world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+        half = [value * MM_TO_M
+                for value in _local_half_extents(shape, source_pl)]
+        collision_shape, _ = _make_collision_shape(
+            p, shape, half, source_pl, world_center, client,
+            is_static=True, mesh_resolution=mesh_resolution,
+            collision_margin=collision_margin)
+        stop_trigger_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=collision_shape,
+            basePosition=[world_center.x * MM_TO_M,
+                          world_center.y * MM_TO_M,
+                          world_center.z * MM_TO_M],
+            baseOrientation=source_pl.Rotation.Q,
+            physicsClientId=client,
+        )
 
     emitter_configs = {}
     rng = random.Random()
@@ -769,6 +809,8 @@ def run_simulation(callback=None):
         if FreeCAD.GuiUp:
             link.ViewObject.Visibility = True
         body_map[body_id] = (emitter, link, local_offset, True)
+        _report_event(
+            f"particle '{link.Label}' emitted by '{emitter.Label}'.")
 
     def destroy_contacted_bodies():
         """Remove active bodies as soon as they contact a destruction trigger."""
@@ -797,9 +839,20 @@ def run_simulation(callback=None):
                 if FreeCAD.GuiUp:
                     link.ViewObject.Visibility = False
 
-            FreeCAD.Console.PrintMessage(
-                f"BulletPhysics: destroy trigger '{trigger.Label}' removed "
-                f"'{body_label}' from the simulation ({trigger.Action}).\n")
+            _report_event(
+                f"particle '{body_label}' {trigger.Action.lower()}d by "
+                f"destroy trigger '{trigger.Label}'.")
+
+    def conditional_stop_contact():
+        """Return the active body label that touched the stop target, if any."""
+        if stop_trigger_id is None:
+            return ""
+        contacts = p.getContactPoints(bodyA=stop_trigger_id, physicsClientId=client)
+        for contact in contacts:
+            entry = body_map.get(contact[2])
+            if entry is not None and entry[0].BodyType == "Active":
+                return entry[0].Label
+        return ""
 
     try:
         for rb in rigid_bodies:
@@ -919,6 +972,7 @@ def run_simulation(callback=None):
 
         # Simulation loop — each recorded frame runs sub_steps Bullet ticks
         for step in range(steps):
+            conditional_stop_reason = ""
             if step > 0:
                 for emitter, index in emission_schedule.get(step, []):
                     spawn_emission(emitter, index)
@@ -945,6 +999,9 @@ def run_simulation(callback=None):
 
             for _ in range(sub_steps):
                 p.stepSimulation(physicsClientId=client)
+                conditional_stop_reason = conditional_stop_contact()
+                if conditional_stop_reason:
+                    break
                 destroy_contacted_bodies()
 
             frame = {}
@@ -965,6 +1022,14 @@ def run_simulation(callback=None):
                 frame[link.Name] = FreeCAD.Placement(new_base, new_rot)
 
             frames.append(frame)
+
+            if conditional_stop_reason:
+                _last_stop_reason = (
+                    f"'{conditional_stop_reason}' touched "
+                    f"'{stop_on_contact.Label}'")
+                FreeCAD.Console.PrintMessage(
+                    f"BulletPhysics: simulation stopped because {_last_stop_reason}.\n")
+                break
 
             if callback:
                 if callback(step + 1, steps) is False:

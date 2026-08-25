@@ -65,6 +65,18 @@ class SimulationPanel:
         self.sim_status = QtWidgets.QLabel("Ready.")
         sim_layout.addWidget(self.sim_status)
 
+        stop_group = QtWidgets.QGroupBox("Conditional Stop")
+        stop_form = QtWidgets.QFormLayout(stop_group)
+        self.stop_on_contact_check = QtWidgets.QCheckBox(
+            "Stop when an active body touches this object")
+        self.stop_on_contact_check.setToolTip(
+            "The selected modelled shape is used as a non-physical contact trigger.")
+        self.stop_target_combo = QtWidgets.QComboBox()
+        self._populate_stop_targets()
+        stop_form.addRow(self.stop_on_contact_check)
+        stop_form.addRow("Target object:", self.stop_target_combo)
+        sim_layout.addWidget(stop_group)
+
         collision_row = QtWidgets.QHBoxLayout()
         self.collision_chk = QtWidgets.QCheckBox("Show Collision Shapes")
         self.collision_chk.setToolTip(
@@ -202,6 +214,8 @@ class SimulationPanel:
         self.refresh_collision_btn.clicked.connect(self._rebuild_wireframes)
         self.mesh_chk.stateChanged.connect(self._on_mesh_chk)
         self.refresh_mesh_btn.clicked.connect(self._rebuild_mesh_displays)
+        self.stop_on_contact_check.toggled.connect(self._update_stop_target_state)
+        self._update_stop_target_state()
 
         self._refresh_world_label()
         from ..simulation.BulletSimulation import (
@@ -209,6 +223,21 @@ class SimulationPanel:
         cleanup_stale_wireframes()
         cleanup_stale_mesh_displays()
         self._try_load_cache()
+
+    def _populate_stop_targets(self):
+        self.stop_target_combo.clear()
+        self.stop_target_combo.addItem("(select an object)", None)
+        for obj in FreeCAD.ActiveDocument.Objects:
+            if hasattr(obj, "Shape") and obj.Shape is not None:
+                self.stop_target_combo.addItem(obj.Label, obj)
+
+    def _update_stop_target_state(self):
+        self.stop_target_combo.setEnabled(self.stop_on_contact_check.isChecked())
+
+    def _stop_target(self):
+        if not self.stop_on_contact_check.isChecked():
+            return None
+        return self.stop_target_combo.currentData()
 
     # ── World info ──────────────────────────────────────────────────────────
 
@@ -238,7 +267,8 @@ class SimulationPanel:
     # ── Simulation ──────────────────────────────────────────────────────────
 
     def _run_simulation(self):
-        from ..simulation.BulletSimulation import run_simulation
+        from ..simulation.BulletSimulation import (
+            get_last_stop_reason, run_simulation)
         self._stop()
         self._refresh_world_label()
         self._sim_stop_requested = False
@@ -253,7 +283,7 @@ class SimulationPanel:
             if self._sim_stop_requested:
                 return False  # signal run_simulation to break early
 
-        result = run_simulation(callback=cb)
+        result = run_simulation(callback=cb, stop_on_contact=self._stop_target())
         self.sim_btn.setEnabled(True)
         self.stop_sim_btn.setEnabled(False)
 
@@ -271,7 +301,13 @@ class SimulationPanel:
             self._rebuild_mesh_displays()
         n = len(self.frames) - 1
         total_secs = n * self.time_step
-        stopped = " (stopped early)" if self._sim_stop_requested else ""
+        stop_reason = get_last_stop_reason()
+        if stop_reason:
+            stopped = f" (stopped: {stop_reason})"
+        elif self._sim_stop_requested:
+            stopped = " (stopped early)"
+        else:
+            stopped = ""
         self.sim_status.setText(
             f"Done — {n} frames  ({total_secs:.2f} s simulated){stopped}")
 

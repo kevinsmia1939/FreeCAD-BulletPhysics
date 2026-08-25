@@ -5,6 +5,7 @@ import FreeCAD
 from PySide.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy,
+    QCheckBox,
 )
 from PySide.QtCore import Qt
 from PySide.QtGui import QColor, QPalette
@@ -17,6 +18,11 @@ def _prefs():
 def get_pybullet_path():
     """Return the stored custom pybullet directory, or empty string if not set."""
     return _prefs().GetString("PybulletPath", "")
+
+
+def get_event_reporting_enabled():
+    """Return whether emitter and destroy-trigger events go to Report View."""
+    return _prefs().GetBool("ReportEvents", False)
 
 
 def _autodetect_pybullet():
@@ -75,7 +81,6 @@ class BulletPreferencesPage:
 
         group = QGroupBox("pybullet")
         root.addWidget(group)
-        root.addStretch(1)
 
         layout = QVBoxLayout(group)
         layout.setSpacing(6)
@@ -118,6 +123,17 @@ class BulletPreferencesPage:
         self._status_label.setWordWrap(True)
         layout.addWidget(self._status_label)
 
+        reporting_group = QGroupBox("Reporting")
+        reporting_layout = QVBoxLayout(reporting_group)
+        self._report_events_check = QCheckBox(
+            "Report emitter and destroy events to the Report View")
+        self._report_events_check.setToolTip(
+            "Log each emitted particle and each particle disabled or deleted "
+            "by a destroy rigid body trigger.")
+        reporting_layout.addWidget(self._report_events_check)
+        root.addWidget(reporting_group)
+        root.addStretch(1)
+
     def _browse(self):
         current = self._path_edit.text().strip()
         start = current if current and os.path.isdir(current) else os.path.expanduser("~")
@@ -144,8 +160,10 @@ class BulletPreferencesPage:
 
     def saveSettings(self):
         _prefs().SetString("PybulletPath", self._path_edit.text().strip())
+        _prefs().SetBool("ReportEvents", self._report_events_check.isChecked())
 
     def loadSettings(self):
+        self._report_events_check.setChecked(get_event_reporting_enabled())
         stored = get_pybullet_path()
         if stored:
             self._path_edit.setText(stored)
