@@ -36,6 +36,8 @@ Video tutorial in screenshot/tutorial.mp4
 - **Recursive downgrade** — Break down array of solids into individual components, useful when setting up a simulation with many solids as rigid body using array and need to separate them.
 
 - **Emitter** — Emit multiple rigid-body objects in certain orientation or direction without manually duplicating rigid-body objects.
+
+- **Destroy Rigid Body** — Rigid-body when touch the shape will be delete/disable.
 ---
 
 ## Requirements

@@ -72,6 +72,23 @@ def _all_emitters(doc=None):
                 and type(obj.Proxy).__name__ == "BulletEmitterFeature")]
 
 
+def collect_destroy_bodies(doc=None):
+    """Return enabled destruction triggers with a valid source shape."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    result = []
+    for obj in doc.Objects:
+        source = getattr(obj, "SourceObject", None)
+        if (hasattr(obj, "Proxy")
+                and type(obj.Proxy).__name__ == "DestroyRigidBodyFeature"
+                and getattr(obj, "Enabled", True)
+                and source is not None
+                and hasattr(source, "Shape")
+                and source.Shape is not None):
+            result.append(obj)
+    return result
+
+
 def _emitter_links(doc):
     links = []
     for emitter in _all_emitters(doc):
@@ -184,23 +201,19 @@ def apply_frame(frame, doc=None):
     import FreeCADGui
     if doc is None:
         doc = FreeCAD.ActiveDocument
-    disabled_links = {
-        rb.BodyLink.Name
-        for rb in collect_rigid_bodies(doc, enabled_only=False)
-        if not getattr(rb, "Enabled", True)
-    }
+    rigid_links = [rb.BodyLink for rb in collect_rigid_bodies(doc, enabled_only=False)
+                   if rb.BodyLink is not None]
     emitted_links = _emitter_links(doc)
-    emitted_names = {link.Name for link in emitted_links}
-    for link in emitted_links:
+    playback_links = rigid_links + emitted_links
+    playback_names = {link.Name for link in playback_links}
+    for link in playback_links:
         if link.Name not in frame:
             link.ViewObject.Visibility = False
     for link_name, placement in frame.items():
-        if link_name in disabled_links:
-            continue
         obj = doc.getObject(link_name)
         if obj is not None:
             obj.Placement = placement
-            if link_name in emitted_names:
+            if link_name in playback_names:
                 obj.ViewObject.Visibility = True
     FreeCADGui.updateGui()
 
@@ -518,6 +531,32 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
         return col, min(half_extents)
 
 
+def _delete_rigid_body_definition(doc, rigid_body):
+    """Delete a rigid-body wrapper and its link, preserving the CAD source object."""
+    from ..objects.BulletContainer import find_container
+
+    container = find_container(doc)
+    if container is not None and hasattr(container, "RigidBodies"):
+        container.RigidBodies = [rb for rb in container.RigidBodies
+                                 if rb != rigid_body]
+
+    launchers = [obj for obj in doc.Objects
+                 if (hasattr(obj, "Proxy")
+                     and type(obj.Proxy).__name__ == "BulletLauncherFeature"
+                     and getattr(obj, "TargetBody", None) == rigid_body)]
+    if container is not None and hasattr(container, "Launchers"):
+        container.Launchers = [launcher for launcher in container.Launchers
+                               if launcher not in launchers]
+    for launcher in launchers:
+        doc.removeObject(launcher.Name)
+
+    link = rigid_body.BodyLink
+    doc.removeObject(rigid_body.Name)
+    if link is not None:
+        doc.removeObject(link.Name)
+    doc.recompute()
+
+
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
@@ -631,6 +670,31 @@ def run_simulation(callback=None):
     body_map = {}
     # {bullet_id: (fire_step, vel_x, vel_y, vel_z, actual_mass)}
     launch_map = {}
+    # {bullet_id: DestroyRigidBodyFeature}
+    destroy_trigger_ids = {}
+
+    for trigger in collect_destroy_bodies():
+        source = trigger.SourceObject
+        shape = source.Shape
+        source_pl = source.Placement
+        bb = shape.BoundBox
+        world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+        half = [value * MM_TO_M
+                for value in _local_half_extents(shape, source_pl)]
+        collision_shape, _ = _make_collision_shape(
+            p, shape, half, source_pl, world_center, client,
+            is_static=True, mesh_resolution=mesh_resolution,
+            collision_margin=collision_margin)
+        trigger_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=collision_shape,
+            basePosition=[world_center.x * MM_TO_M,
+                          world_center.y * MM_TO_M,
+                          world_center.z * MM_TO_M],
+            baseOrientation=source_pl.Rotation.Q,
+            physicsClientId=client,
+        )
+        destroy_trigger_ids[trigger_id] = trigger
 
     emitter_configs = {}
     rng = random.Random()
@@ -705,6 +769,37 @@ def run_simulation(callback=None):
         if FreeCAD.GuiUp:
             link.ViewObject.Visibility = True
         body_map[body_id] = (emitter, link, local_offset, True)
+
+    def destroy_contacted_bodies():
+        """Remove active bodies as soon as they contact a destruction trigger."""
+        destroyed = {}
+        for trigger_id, trigger in destroy_trigger_ids.items():
+            contacts = p.getContactPoints(bodyA=trigger_id, physicsClientId=client)
+            for contact in contacts:
+                body_id = contact[2]
+                entry = body_map.get(body_id)
+                if entry is not None and entry[0].BodyType == "Active":
+                    destroyed[body_id] = trigger
+
+        for body_id, trigger in destroyed.items():
+            body_config, link, _local_offset, is_emitted = body_map.pop(body_id)
+            body_label = body_config.Label
+            launch_map.pop(body_id, None)
+            p.removeBody(body_id, physicsClientId=client)
+
+            if is_emitted:
+                if FreeCAD.GuiUp:
+                    link.ViewObject.Visibility = False
+            elif trigger.Action == "Delete":
+                _delete_rigid_body_definition(FreeCAD.ActiveDocument, body_config)
+            else:
+                body_config.Enabled = False
+                if FreeCAD.GuiUp:
+                    link.ViewObject.Visibility = False
+
+            FreeCAD.Console.PrintMessage(
+                f"BulletPhysics: destroy trigger '{trigger.Label}' removed "
+                f"'{body_label}' from the simulation ({trigger.Action}).\n")
 
     try:
         for rb in rigid_bodies:
@@ -850,12 +945,12 @@ def run_simulation(callback=None):
 
             for _ in range(sub_steps):
                 p.stepSimulation(physicsClientId=client)
+                destroy_contacted_bodies()
 
             frame = {}
             for body_id, (rb, link, local_offset, is_emitted) in body_map.items():
                 if rb.BodyType == "Passive":
-                    if is_emitted:
-                        frame[link.Name] = link.Placement.copy()
+                    frame[link.Name] = link.Placement.copy()
                     continue
                 pos, orn = p.getBasePositionAndOrientation(
                     body_id, physicsClientId=client)

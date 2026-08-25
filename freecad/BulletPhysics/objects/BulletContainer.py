@@ -13,6 +13,8 @@ class BulletContainerFeature:
                         "Velocity launcher objects managed by this simulation")
         obj.addProperty("App::PropertyLinkList", "Emitters", "Container",
                         "Rigid body emitter objects managed by this simulation")
+        obj.addProperty("App::PropertyLinkList", "DestroyBodies", "Container",
+                        "Destroy-rigid-body trigger objects")
         obj.Proxy = self
 
     def execute(self, obj):
@@ -22,6 +24,9 @@ class BulletContainerFeature:
         if not hasattr(obj, "Emitters"):
             obj.addProperty("App::PropertyLinkList", "Emitters", "Container",
                             "Rigid body emitter objects managed by this simulation")
+        if not hasattr(obj, "DestroyBodies"):
+            obj.addProperty("App::PropertyLinkList", "DestroyBodies", "Container",
+                            "Destroy-rigid-body trigger objects")
 
     def __getstate__(self):
         return None
@@ -63,6 +68,8 @@ class BulletContainerViewProvider:
             children.extend(ln for ln in obj.Launchers if ln is not None)
         if hasattr(obj, "Emitters"):
             children.extend(emitter for emitter in obj.Emitters if emitter is not None)
+        if hasattr(obj, "DestroyBodies"):
+            children.extend(trigger for trigger in obj.DestroyBodies if trigger is not None)
         return children
 
     def onChanged(self, vobj, prop):
@@ -88,6 +95,13 @@ class BulletContainerViewProvider:
                     if emitter is not None:
                         try:
                             emitter.ViewObject.Visibility = visible
+                        except Exception:
+                            pass
+            if hasattr(obj, "DestroyBodies"):
+                for trigger in obj.DestroyBodies:
+                    if trigger is not None:
+                        try:
+                            trigger.ViewObject.Visibility = visible
                         except Exception:
                             pass
 
