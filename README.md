@@ -18,6 +18,8 @@ Video tutorial in screenshot/tutorial.mp4
 
 ![Emitter object — emit rigid-body object](screenshot/emitter.png)
 
+![Interestingly many research use Bullet Physics for packed bed simulation](screenshot/packed_bed.png)
+
 ---
 
 ## Features
