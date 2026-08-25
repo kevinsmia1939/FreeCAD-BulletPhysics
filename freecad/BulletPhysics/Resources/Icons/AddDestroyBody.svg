@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="destroyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff8a78"/>
+      <stop offset="100%" stop-color="#b72f24"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 14h40v36H12z" fill="url(#destroyGrad)" stroke="#7d211a" stroke-width="2.5"/>
+  <path d="m23 22 18 18M41 22 23 40" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="52" cy="12" r="10" fill="#2ecc40" stroke="white" stroke-width="1.5"/>
+  <path d="M52 7v10M47 12h10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
