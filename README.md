@@ -37,7 +37,7 @@ Video tutorial in screenshot/tutorial.mp4
 
 - **Emitter** — Emit multiple rigid-body objects in certain orientation or direction without manually duplicating rigid-body objects.
 
-- **Destroy Rigid Body** — Rigid-body when touch the shape will be delete/disable.
+- **Destroy Rigid Body** — When touched, will be deleted/disabled. This can reduce unnecessary compute resources where rigid-body fell off the platform.
 ---
 
 ## Requirements
