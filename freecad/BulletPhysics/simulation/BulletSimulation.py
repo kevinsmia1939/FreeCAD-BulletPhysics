@@ -35,6 +35,54 @@ def collect_rigid_bodies(doc=None, enabled_only=True):
     return result
 
 
+def _find_mesh_settings(doc=None):
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    for obj in doc.Objects:
+        if (hasattr(obj, "Proxy")
+                and type(obj.Proxy).__name__ == "MeshSettingsFeature"):
+            return obj
+    return None
+
+
+def _mesh_settings_error(rigid_bodies, emitters, doc=None):
+    """Return a preflight error for the shared rigid-body mesh, if any."""
+    settings = _find_mesh_settings(doc)
+    if settings is None:
+        return "No global Mesh object found. Use Mesh Rigid Bodies and generate meshes first."
+    if (getattr(settings, "GeneratedMesher", "") != settings.Mesher
+            or abs(getattr(settings, "GeneratedMeshSize", 0.0) - settings.MeshSize) > 1e-9
+            or abs(getattr(settings, "GeneratedAngularDeflection", 0.0)
+                   - settings.AngularDeflection) > 1e-9):
+        return "Mesh settings changed. Generate meshes again before simulating."
+
+    sources = set()
+    for mesh_obj in getattr(settings, "GeneratedMeshes", []):
+        if mesh_obj is None or not hasattr(mesh_obj, "SourceObject"):
+            continue
+        try:
+            if mesh_obj.Mesh.CountFacets > 0:
+                sources.add(mesh_obj.SourceObject.Name)
+        except Exception:
+            pass
+    source_objects = [body.OriginalObject for body in rigid_bodies]
+    source_objects.extend(emitter.TemplateObject for emitter in emitters)
+    missing = [source.Label for source in source_objects if source.Name not in sources]
+    if missing:
+        return "Missing generated meshes for: " + ", ".join(missing)
+    return ""
+
+
+def _generated_mesh_for_source(settings, source):
+    """Return the pre-generated mesh assigned to *source*, if available."""
+    if settings is None:
+        return None
+    for mesh_obj in getattr(settings, "GeneratedMeshes", []):
+        if getattr(mesh_obj, "SourceObject", None) == source:
+            return mesh_obj.Mesh
+    return None
+
+
 def collect_launchers(doc=None):
     """Return launchers whose target body is enabled for simulation."""
     if doc is None:
@@ -389,7 +437,8 @@ def _make_vhacd_compound_shape(p, verts_m, indices_flat, client, collision_margi
     return compound
 
 
-def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
+def _tessellate_to_local(fc_shape, orig_pl, world_center, precision,
+                         source_mesh=None):
     """
     Tessellate fc_shape and return (vertices, flat_indices) in body-local space.
 
@@ -398,7 +447,10 @@ def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
 
     *precision* is the maximum chord deviation in mm (from MeshResolution).
     """
-    verts_world, tri_faces = fc_shape.tessellate(precision)
+    if source_mesh is not None:
+        verts_world, tri_faces = source_mesh.Topology
+    else:
+        verts_world, tri_faces = fc_shape.tessellate(precision)
     if not verts_world or not tri_faces:
         raise ValueError("tessellate() returned an empty mesh")
 
@@ -418,7 +470,8 @@ def _tessellate_to_local(fc_shape, orig_pl, world_center, precision):
 
 def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
                           client, is_static=False, mesh_resolution=1.0,
-                          forced_type=None, collision_margin=0.001):
+                          forced_type=None, collision_margin=0.001,
+                          source_mesh=None):
     """
     Create the most accurate pybullet collision shape for fc_shape.
 
@@ -476,7 +529,7 @@ def _make_collision_shape(p, fc_shape, half_extents, orig_pl, world_center,
     # --- Custom mesh shape ---
     try:
         verts, indices = _tessellate_to_local(
-            fc_shape, orig_pl, world_center, mesh_resolution)
+            fc_shape, orig_pl, world_center, mesh_resolution, source_mesh)
 
         # Determine mesh mode:
         #   forced "mesh"       → always concave BVH (btBvhTriangleMeshShape)
@@ -611,6 +664,13 @@ def run_simulation(callback=None, stop_on_contact=None):
             "Add Active/Passive rigid bodies or configure an emitter first.\n"
         )
         return None
+    if rigid_bodies or emitters:
+        mesh_error = _mesh_settings_error(rigid_bodies, emitters)
+        if mesh_error:
+            FreeCAD.Console.PrintWarning(
+                f"BulletPhysics: {mesh_error}\n")
+            return None
+        mesh_settings = _find_mesh_settings()
 
     # --- Physics World settings ---
     world = find_world()
@@ -630,6 +690,10 @@ def run_simulation(callback=None, stop_on_contact=None):
         collision_margin = max(0.0, getattr(world, "CollisionMargin", 0.001))
         linear_damping   = max(0.0, min(1.0, getattr(world, "LinearDamping", 0.0)))
         angular_damping  = max(0.0, min(1.0, getattr(world, "AngularDamping", 0.0)))
+        stop_when_settled = getattr(world, "StopWhenSettled", False)
+        settle_linear = max(0.0, getattr(world, "SettleLinearVelocity", 0.01))
+        settle_angular = max(0.0, getattr(world, "SettleAngularVelocity", 0.01))
+        settle_duration = max(0.0, getattr(world, "SettleDuration", 0.5))
     else:
         gravity_mag      = 9.81
         gravity_dir      = FreeCAD.Vector(0, 0, -1)
@@ -641,6 +705,13 @@ def run_simulation(callback=None, stop_on_contact=None):
         collision_margin = 0.001
         linear_damping   = 0.0
         angular_damping  = 0.0
+        stop_when_settled = False
+        settle_linear = 0.01
+        settle_angular = 0.01
+        settle_duration = 0.5
+
+    if mesh_settings is not None:
+        mesh_resolution = max(0.001, mesh_settings.MeshSize)
 
     steps = max(1, round(end_time / time_step))
 
@@ -688,6 +759,8 @@ def run_simulation(callback=None, stop_on_contact=None):
     launch_map = {}
     # {bullet_id: DestroyRigidBodyFeature}
     destroy_trigger_ids = {}
+    # {bullet_id: (BulletEmitterFeature, "Start" | "Stop")}
+    emitter_condition_trigger_ids = {}
     stop_trigger_id = None
 
     for trigger in collect_destroy_bodies():
@@ -712,6 +785,33 @@ def run_simulation(callback=None, stop_on_contact=None):
             physicsClientId=client,
         )
         destroy_trigger_ids[trigger_id] = trigger
+
+    for emitter in emitters:
+        for condition_type, source in (
+                ("Start", getattr(emitter, "StartConditionObject", None)),
+                ("Stop", getattr(emitter, "StopConditionObject", None))):
+            if source is None or not hasattr(source, "Shape") or source.Shape is None:
+                continue
+            shape = source.Shape
+            source_pl = source.Placement
+            bb = shape.BoundBox
+            world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+            half = [value * MM_TO_M
+                    for value in _local_half_extents(shape, source_pl)]
+            collision_shape, _ = _make_collision_shape(
+                p, shape, half, source_pl, world_center, client,
+                is_static=True, mesh_resolution=mesh_resolution,
+                collision_margin=collision_margin)
+            trigger_id = p.createMultiBody(
+                baseMass=0.0,
+                baseCollisionShapeIndex=collision_shape,
+                basePosition=[world_center.x * MM_TO_M,
+                              world_center.y * MM_TO_M,
+                              world_center.z * MM_TO_M],
+                baseOrientation=source_pl.Rotation.Q,
+                physicsClientId=client,
+            )
+            emitter_condition_trigger_ids[trigger_id] = (emitter, condition_type)
 
     if (stop_on_contact is not None
             and hasattr(stop_on_contact, "Shape")
@@ -751,7 +851,8 @@ def run_simulation(callback=None, stop_on_contact=None):
         col, characteristic_radius = _make_collision_shape(
             p, template_shape, half, template_pl, template_center, client,
             is_static=is_static, mesh_resolution=mesh_resolution,
-            collision_margin=collision_margin)
+            collision_margin=collision_margin,
+            source_mesh=_generated_mesh_for_source(mesh_settings, template))
         local_offset = template_pl.Rotation.inverted().multVec(
             template_center - template_pl.Base)
         density = max(0.0, getattr(emitter, "Density", 1000.0))
@@ -762,7 +863,24 @@ def run_simulation(callback=None, stop_on_contact=None):
             max(0.0, getattr(emitter, "Friction", 0.5)),
         )
 
-    emission_schedule = _emitter_schedule(emitters, time_step)
+    emission_schedule = {}
+    started_emitters = set()
+    stopped_emitters = set()
+
+    def schedule_emitter(emitter, base_step):
+        """Schedule an emitter's time window relative to *base_step*."""
+        count = max(1, int(getattr(emitter, "Count", 1)))
+        start = max(0.0, getattr(emitter, "StartTime", 0.0))
+        end = max(start, getattr(emitter, "EndTime", start))
+        for index in range(count):
+            time = start if count == 1 else start + (end - start) * index / (count - 1)
+            step = base_step + max(0, int(round(time / time_step)))
+            emission_schedule.setdefault(step, []).append((emitter, index))
+
+    for emitter in emitters:
+        if getattr(emitter, "StartConditionObject", None) is None:
+            schedule_emitter(emitter, 0)
+            started_emitters.add(emitter.Name)
 
     def spawn_emission(emitter, index):
         link = emitter_links[emitter.Name][index]
@@ -854,6 +972,28 @@ def run_simulation(callback=None, stop_on_contact=None):
                 return entry[0].Label
         return ""
 
+    def update_emitter_conditions(next_step):
+        """Start or stop emitters whose configured trigger was just touched."""
+        for trigger_id, (emitter, condition_type) in emitter_condition_trigger_ids.items():
+            contacts = p.getContactPoints(bodyA=trigger_id, physicsClientId=client)
+            touched = any(
+                entry is not None and entry[0].BodyType == "Active"
+                for entry in (body_map.get(contact[2]) for contact in contacts))
+            if not touched:
+                continue
+            if condition_type == "Start" and emitter.Name not in started_emitters:
+                if emitter.Name not in stopped_emitters:
+                    schedule_emitter(emitter, next_step)
+                    _report_event(
+                        f"emitter '{emitter.Label}' started by "
+                        f"'{emitter.StartConditionObject.Label}'.")
+                started_emitters.add(emitter.Name)
+            elif condition_type == "Stop" and emitter.Name not in stopped_emitters:
+                stopped_emitters.add(emitter.Name)
+                _report_event(
+                    f"emitter '{emitter.Label}' stopped by "
+                    f"'{emitter.StopConditionObject.Label}'.")
+
     try:
         for rb in rigid_bodies:
             original = rb.OriginalObject
@@ -891,7 +1031,8 @@ def run_simulation(callback=None, stop_on_contact=None):
             col, characteristic_radius = _make_collision_shape(
                 p, shape, half, orig_pl, world_center, client,
                 is_static=is_static, mesh_resolution=effective_res,
-                forced_type=forced_type, collision_margin=collision_margin)
+                forced_type=forced_type, collision_margin=collision_margin,
+                source_mesh=_generated_mesh_for_source(mesh_settings, original))
 
             rot_q = orig_pl.Rotation.Q      # (x, y, z, w)
             if rb.BodyType == "Active":
@@ -969,13 +1110,40 @@ def run_simulation(callback=None, stop_on_contact=None):
         frames = [initial_frame]
 
         fired_launchers = set()
+        settled_elapsed = 0.0
+
+        def has_future_simulation_events(current_step):
+            """Keep settling disabled until queued launches/emissions are complete."""
+            if any(body_id not in fired_launchers and fire_step > current_step
+                   for body_id, (fire_step, *_values) in launch_map.items()):
+                return True
+            return any(
+                scheduled_step > current_step
+                and emitter.Name not in stopped_emitters
+                for scheduled_step, emissions in emission_schedule.items()
+                for emitter, _index in emissions)
+
+        def active_bodies_settled(current_step):
+            if has_future_simulation_events(current_step):
+                return False
+            for body_id, (body_config, _link, _offset, _emitted) in body_map.items():
+                if body_config.BodyType != "Active":
+                    continue
+                linear, angular = p.getBaseVelocity(
+                    body_id, physicsClientId=client)
+                linear_speed = sum(value * value for value in linear) ** 0.5
+                angular_speed = sum(value * value for value in angular) ** 0.5
+                if linear_speed > settle_linear or angular_speed > settle_angular:
+                    return False
+            return True
 
         # Simulation loop — each recorded frame runs sub_steps Bullet ticks
         for step in range(steps):
             conditional_stop_reason = ""
             if step > 0:
                 for emitter, index in emission_schedule.get(step, []):
-                    spawn_emission(emitter, index)
+                    if emitter.Name not in stopped_emitters:
+                        spawn_emission(emitter, index)
 
             # Fire any launchers whose time has come (before stepping this frame)
             for body_id, (fire_step, vx, vy, vz, actual_mass, char_r) in launch_map.items():
@@ -1002,6 +1170,10 @@ def run_simulation(callback=None, stop_on_contact=None):
                 conditional_stop_reason = conditional_stop_contact()
                 if conditional_stop_reason:
                     break
+                # Evaluate emission triggers before destruction removes the
+                # contacting Bullet body. This lets a shared target both stop
+                # an emitter and destroy the incoming active body.
+                update_emitter_conditions(step + 1)
                 destroy_contacted_bodies()
 
             frame = {}
@@ -1030,6 +1202,20 @@ def run_simulation(callback=None, stop_on_contact=None):
                 FreeCAD.Console.PrintMessage(
                     f"BulletPhysics: simulation stopped because {_last_stop_reason}.\n")
                 break
+
+            if stop_when_settled:
+                if active_bodies_settled(step):
+                    settled_elapsed += time_step
+                else:
+                    settled_elapsed = 0.0
+                if settled_elapsed >= settle_duration:
+                    _last_stop_reason = (
+                        "all active bodies settled below "
+                        f"{settle_linear:g} m/s and {settle_angular:g} rad/s "
+                        f"for {settled_elapsed:.3f} s")
+                    FreeCAD.Console.PrintMessage(
+                        f"BulletPhysics: simulation stopped because {_last_stop_reason}.\n")
+                    break
 
             if callback:
                 if callback(step + 1, steps) is False:

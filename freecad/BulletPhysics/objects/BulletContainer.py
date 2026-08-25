@@ -15,6 +15,8 @@ class BulletContainerFeature:
                         "Rigid body emitter objects managed by this simulation")
         obj.addProperty("App::PropertyLinkList", "DestroyBodies", "Container",
                         "Destroy-rigid-body trigger objects")
+        obj.addProperty("App::PropertyLink", "MeshSettings", "Container",
+                        "Global mesh settings shared by every rigid body")
         obj.Proxy = self
 
     def execute(self, obj):
@@ -27,6 +29,9 @@ class BulletContainerFeature:
         if not hasattr(obj, "DestroyBodies"):
             obj.addProperty("App::PropertyLinkList", "DestroyBodies", "Container",
                             "Destroy-rigid-body trigger objects")
+        if not hasattr(obj, "MeshSettings"):
+            obj.addProperty("App::PropertyLink", "MeshSettings", "Container",
+                            "Global mesh settings shared by every rigid body")
 
     def __getstate__(self):
         return None
@@ -62,6 +67,8 @@ class BulletContainerViewProvider:
             children.append(obj.World)
         if hasattr(obj, "BodyTable") and obj.BodyTable is not None:
             children.append(obj.BodyTable)
+        if hasattr(obj, "MeshSettings") and obj.MeshSettings is not None:
+            children.append(obj.MeshSettings)
         if hasattr(obj, "RigidBodies"):
             children.extend(rb for rb in obj.RigidBodies if rb is not None)
         if hasattr(obj, "Launchers"):

@@ -44,6 +44,19 @@ class BulletWorldFeature:
                         "Bullet's built-in default is 0.04 m.")
         obj.CollisionMargin = 0.001
 
+        obj.addProperty("App::PropertyBool", "StopWhenSettled", "Simulation",
+                        "End the simulation after all active bodies remain below the settle thresholds")
+        obj.StopWhenSettled = False
+        obj.addProperty("App::PropertyFloat", "SettleLinearVelocity", "Simulation",
+                        "Maximum linear speed in m/s for an active body to be considered settled")
+        obj.SettleLinearVelocity = 0.01
+        obj.addProperty("App::PropertyFloat", "SettleAngularVelocity", "Simulation",
+                        "Maximum angular speed in rad/s for an active body to be considered settled")
+        obj.SettleAngularVelocity = 0.01
+        obj.addProperty("App::PropertyFloat", "SettleDuration", "Simulation",
+                        "Time in seconds that every active body must remain settled before stopping")
+        obj.SettleDuration = 0.5
+
         obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                         "Air damping applied to linear (translational) velocity of active "
                         "bodies each step. 0 = no damping, 1 = full stop. "
@@ -96,6 +109,22 @@ class BulletWorldFeature:
                             "Smaller values let objects appear to touch. "
                             "Bullet's built-in default is 0.04 m.")
             obj.CollisionMargin = 0.001
+        if not hasattr(obj, "StopWhenSettled"):
+            obj.addProperty("App::PropertyBool", "StopWhenSettled", "Simulation",
+                            "End the simulation after all active bodies remain below the settle thresholds")
+            obj.StopWhenSettled = False
+        if not hasattr(obj, "SettleLinearVelocity"):
+            obj.addProperty("App::PropertyFloat", "SettleLinearVelocity", "Simulation",
+                            "Maximum linear speed in m/s for an active body to be considered settled")
+            obj.SettleLinearVelocity = 0.01
+        if not hasattr(obj, "SettleAngularVelocity"):
+            obj.addProperty("App::PropertyFloat", "SettleAngularVelocity", "Simulation",
+                            "Maximum angular speed in rad/s for an active body to be considered settled")
+            obj.SettleAngularVelocity = 0.01
+        if not hasattr(obj, "SettleDuration"):
+            obj.addProperty("App::PropertyFloat", "SettleDuration", "Simulation",
+                            "Time in seconds that every active body must remain settled before stopping")
+            obj.SettleDuration = 0.5
 
     def execute(self, obj):
         pass
@@ -117,6 +146,8 @@ class WorldSettingsPanel:
         from PySide import QtWidgets
 
         self._obj = world_obj
+        if hasattr(world_obj.Proxy, "_ensure_properties"):
+            world_obj.Proxy._ensure_properties(world_obj)
 
         self.form = QtWidgets.QWidget()
         self.form.setWindowTitle("Physics World Settings")
@@ -236,6 +267,39 @@ class WorldSettingsPanel:
         self.inp_margin.setValue(getattr(world_obj, "CollisionMargin", 0.001))
         sim_form.addRow("Collision Margin:", self.inp_margin)
 
+        self.inp_stop_when_settled = QtWidgets.QCheckBox(
+            "Finish simulation when active bodies settle")
+        self.inp_stop_when_settled.setToolTip(
+            "Stop after every active body stays below the selected velocity thresholds.\n"
+            "Pending launcher and emitter events keep the simulation running.")
+        self.inp_stop_when_settled.setChecked(
+            getattr(world_obj, "StopWhenSettled", False))
+        sim_form.addRow(self.inp_stop_when_settled)
+
+        self.inp_settle_linear = QtWidgets.QDoubleSpinBox()
+        self.inp_settle_linear.setRange(0.0, 1000.0)
+        self.inp_settle_linear.setDecimals(5)
+        self.inp_settle_linear.setSuffix(" m/s")
+        self.inp_settle_linear.setValue(
+            max(0.0, getattr(world_obj, "SettleLinearVelocity", 0.01)))
+        sim_form.addRow("Settle linear speed:", self.inp_settle_linear)
+
+        self.inp_settle_angular = QtWidgets.QDoubleSpinBox()
+        self.inp_settle_angular.setRange(0.0, 1000.0)
+        self.inp_settle_angular.setDecimals(5)
+        self.inp_settle_angular.setSuffix(" rad/s")
+        self.inp_settle_angular.setValue(
+            max(0.0, getattr(world_obj, "SettleAngularVelocity", 0.01)))
+        sim_form.addRow("Settle angular speed:", self.inp_settle_angular)
+
+        self.inp_settle_duration = QtWidgets.QDoubleSpinBox()
+        self.inp_settle_duration.setRange(0.0, 3600.0)
+        self.inp_settle_duration.setDecimals(3)
+        self.inp_settle_duration.setSuffix(" s")
+        self.inp_settle_duration.setValue(
+            max(0.0, getattr(world_obj, "SettleDuration", 0.5)))
+        sim_form.addRow("Settle duration:", self.inp_settle_duration)
+
         root.addWidget(sim_group)
         root.addStretch(1)
 
@@ -252,6 +316,18 @@ class WorldSettingsPanel:
         self.inp_substeps.valueChanged.connect(self._apply)
         self.inp_meshres.valueChanged.connect(self._apply)
         self.inp_margin.valueChanged.connect(self._apply)
+        self.inp_stop_when_settled.toggled.connect(self._update_settle_controls)
+        self.inp_stop_when_settled.toggled.connect(self._apply)
+        self.inp_settle_linear.valueChanged.connect(self._apply)
+        self.inp_settle_angular.valueChanged.connect(self._apply)
+        self.inp_settle_duration.valueChanged.connect(self._apply)
+        self._update_settle_controls()
+
+    def _update_settle_controls(self):
+        enabled = self.inp_stop_when_settled.isChecked()
+        self.inp_settle_linear.setEnabled(enabled)
+        self.inp_settle_angular.setEnabled(enabled)
+        self.inp_settle_duration.setEnabled(enabled)
 
     def _apply(self):
         obj = self._obj
@@ -266,6 +342,10 @@ class WorldSettingsPanel:
         obj.SubSteps         = self.inp_substeps.value()
         obj.MeshResolution   = self.inp_meshres.value()
         obj.CollisionMargin  = self.inp_margin.value()
+        obj.StopWhenSettled = self.inp_stop_when_settled.isChecked()
+        obj.SettleLinearVelocity = self.inp_settle_linear.value()
+        obj.SettleAngularVelocity = self.inp_settle_angular.value()
+        obj.SettleDuration = self.inp_settle_duration.value()
 
     def reject(self):
         import FreeCADGui
