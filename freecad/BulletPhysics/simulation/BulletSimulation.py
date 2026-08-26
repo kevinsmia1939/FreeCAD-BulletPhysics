@@ -1,10 +1,12 @@
 import FreeCAD
 import math
 import random
+import time
 
 MM_TO_M = 0.001
 M_TO_MM = 1000.0
 _last_stop_reason = ""
+_last_compute_time_seconds = 0.0
 
 
 def _report_event(message):
@@ -706,6 +708,11 @@ def get_last_stop_reason():
     return _last_stop_reason
 
 
+def get_last_compute_time_seconds():
+    """Return the wall-clock duration of the most recent simulation run."""
+    return _last_compute_time_seconds
+
+
 def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
     """
     Run the Bullet Physics simulation using settings from the BulletWorld object.
@@ -714,8 +721,10 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
     Each placement frame maps App::Link.Name to FreeCAD.Placement; each speed
     frame maps the same link names to scalar Bullet linear velocity in m/s.
     """
-    global _last_stop_reason
+    global _last_stop_reason, _last_compute_time_seconds
     _last_stop_reason = ""
+    _last_compute_time_seconds = 0.0
+    compute_started_at = time.perf_counter()
     stop_delay = max(0.0, float(stop_delay))
 
     try:
@@ -1397,6 +1406,10 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
 
     finally:
         p.disconnect(client)
+        _last_compute_time_seconds = time.perf_counter() - compute_started_at
+        FreeCAD.Console.PrintMessage(
+            "BulletPhysics: simulation computation time: {:.3f} s\n"
+            .format(_last_compute_time_seconds))
 
 
 # ---------------------------------------------------------------------------

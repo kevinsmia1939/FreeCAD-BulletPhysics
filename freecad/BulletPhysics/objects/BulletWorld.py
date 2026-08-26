@@ -51,6 +51,28 @@ class BulletWorldFeature:
                         "Time in seconds that every active body must remain settled before stopping")
         obj.SettleDuration = 0.5
 
+        obj.addProperty("App::PropertyBool", "ConditionalStopEnabled", "Conditions",
+                        "Stop after an active body touches the selected target")
+        obj.ConditionalStopEnabled = False
+        obj.addProperty("App::PropertyLink", "ConditionalStopTarget", "Conditions",
+                        "Non-physical target shape used for the conditional stop")
+        obj.addProperty("App::PropertyFloat", "ConditionalStopDelay", "Conditions",
+                        "Time in seconds to continue after the first target contact")
+        obj.ConditionalStopDelay = 0.0
+
+        obj.addProperty("App::PropertyBool", "ShowCollisionWireframes", "Display",
+                        "Show collision-shape wireframes in the simulation panel")
+        obj.ShowCollisionWireframes = False
+        obj.addProperty("App::PropertyString", "PlaybackSpeed", "Playback",
+                        "Selected playback speed in the simulation panel")
+        obj.PlaybackSpeed = "1×"
+        obj.addProperty("App::PropertyBool", "PlaybackLoop", "Playback",
+                        "Loop playback in the simulation panel")
+        obj.PlaybackLoop = True
+        obj.addProperty("App::PropertyString", "SpeedGraphAxis", "Analysis",
+                        "Horizontal axis selected for the particle speed graph")
+        obj.SpeedGraphAxis = "Time"
+
         obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                         "Air damping applied to linear (translational) velocity of active "
                         "bodies each step. 0 = no damping, 1 = full stop. "
@@ -113,6 +135,33 @@ class BulletWorldFeature:
             obj.addProperty("App::PropertyFloat", "SettleDuration", "Simulation",
                             "Time in seconds that every active body must remain settled before stopping")
             obj.SettleDuration = 0.5
+        if not hasattr(obj, "ConditionalStopEnabled"):
+            obj.addProperty("App::PropertyBool", "ConditionalStopEnabled", "Conditions",
+                            "Stop after an active body touches the selected target")
+            obj.ConditionalStopEnabled = False
+        if not hasattr(obj, "ConditionalStopTarget"):
+            obj.addProperty("App::PropertyLink", "ConditionalStopTarget", "Conditions",
+                            "Non-physical target shape used for the conditional stop")
+        if not hasattr(obj, "ConditionalStopDelay"):
+            obj.addProperty("App::PropertyFloat", "ConditionalStopDelay", "Conditions",
+                            "Time in seconds to continue after the first target contact")
+            obj.ConditionalStopDelay = 0.0
+        if not hasattr(obj, "ShowCollisionWireframes"):
+            obj.addProperty("App::PropertyBool", "ShowCollisionWireframes", "Display",
+                            "Show collision-shape wireframes in the simulation panel")
+            obj.ShowCollisionWireframes = False
+        if not hasattr(obj, "PlaybackSpeed"):
+            obj.addProperty("App::PropertyString", "PlaybackSpeed", "Playback",
+                            "Selected playback speed in the simulation panel")
+            obj.PlaybackSpeed = "1×"
+        if not hasattr(obj, "PlaybackLoop"):
+            obj.addProperty("App::PropertyBool", "PlaybackLoop", "Playback",
+                            "Loop playback in the simulation panel")
+            obj.PlaybackLoop = True
+        if not hasattr(obj, "SpeedGraphAxis"):
+            obj.addProperty("App::PropertyString", "SpeedGraphAxis", "Analysis",
+                            "Horizontal axis selected for the particle speed graph")
+            obj.SpeedGraphAxis = "Time"
 
     def execute(self, obj):
         pass
@@ -321,6 +370,7 @@ class WorldSettingsPanel:
         obj.SettleLinearVelocity = self.inp_settle_linear.value()
         obj.SettleAngularVelocity = self.inp_settle_angular.value()
         obj.SettleDuration = self.inp_settle_duration.value()
+        obj.Document.recompute()
 
     def reject(self):
         import FreeCADGui

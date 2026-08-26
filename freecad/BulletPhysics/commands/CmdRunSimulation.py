@@ -32,6 +32,8 @@ class SimulationPanel:
         self._sim_stop_requested = False
         self._sim_paused = False
         self._closed = False
+        self._loading_stop_condition = False
+        self._loading_panel_settings = False
 
         self.form = QtWidgets.QWidget()
         self.form.setWindowTitle("Bullet Physics")
@@ -230,8 +232,16 @@ class SimulationPanel:
         self.speed_combo.currentIndexChanged.connect(self._update_timer_interval)
 
         self.collision_chk.stateChanged.connect(self._on_collision_chk)
+        self.collision_chk.stateChanged.connect(self._save_panel_settings)
         self.refresh_collision_btn.clicked.connect(self._rebuild_wireframes)
         self.stop_on_contact_check.toggled.connect(self._update_stop_target_state)
+        self.stop_on_contact_check.toggled.connect(self._save_stop_condition)
+        self.stop_target_combo.currentIndexChanged.connect(self._save_stop_condition)
+        self.stop_delay_spin.valueChanged.connect(self._save_stop_condition)
+        self.speed_combo.currentIndexChanged.connect(self._save_panel_settings)
+        self.loop_chk.toggled.connect(self._save_panel_settings)
+        self.speed_graph_axis.currentIndexChanged.connect(self._save_panel_settings)
+        self._load_stop_condition()
         self._update_stop_target_state()
 
         self._refresh_world_label()
@@ -239,6 +249,7 @@ class SimulationPanel:
             cleanup_stale_wireframes, cleanup_stale_mesh_displays)
         cleanup_stale_wireframes()
         cleanup_stale_mesh_displays()
+        self._load_panel_settings()
         self._try_load_cache()
         if self._show_collision_mesh():
             self._rebuild_mesh_displays()
@@ -264,6 +275,71 @@ class SimulationPanel:
         if not self.stop_on_contact_check.isChecked():
             return 0.0
         return self.stop_delay_spin.value()
+
+    def _conditional_stop_world(self):
+        from ..objects.BulletWorld import find_world
+
+        world = find_world()
+        if world is not None and hasattr(world.Proxy, "_ensure_properties"):
+            world.Proxy._ensure_properties(world)
+        return world
+
+    def _load_stop_condition(self):
+        world = self._conditional_stop_world()
+        if world is None:
+            return
+        target = getattr(world, "ConditionalStopTarget", None)
+        self._loading_stop_condition = True
+        self.stop_on_contact_check.setChecked(
+            getattr(world, "ConditionalStopEnabled", False))
+        self.stop_delay_spin.setValue(max(
+            0.0, getattr(world, "ConditionalStopDelay", 0.0)))
+        for index in range(self.stop_target_combo.count()):
+            if self.stop_target_combo.itemData(index) == target:
+                self.stop_target_combo.setCurrentIndex(index)
+                break
+        self._loading_stop_condition = False
+
+    def _save_stop_condition(self, *_args):
+        if self._loading_stop_condition:
+            return
+        world = self._conditional_stop_world()
+        if world is None:
+            return
+        world.ConditionalStopEnabled = self.stop_on_contact_check.isChecked()
+        world.ConditionalStopTarget = self._stop_target()
+        world.ConditionalStopDelay = self.stop_delay_spin.value()
+        world.Document.recompute()
+
+    def _load_panel_settings(self):
+        world = self._conditional_stop_world()
+        if world is None:
+            return
+        self._loading_panel_settings = True
+        self.collision_chk.setChecked(
+            getattr(world, "ShowCollisionWireframes", False))
+        speed = getattr(world, "PlaybackSpeed", "1×")
+        speed_index = self.speed_combo.findText(speed)
+        if speed_index >= 0:
+            self.speed_combo.setCurrentIndex(speed_index)
+        self.loop_chk.setChecked(getattr(world, "PlaybackLoop", True))
+        axis = getattr(world, "SpeedGraphAxis", "Time")
+        axis_index = self.speed_graph_axis.findText(axis)
+        if axis_index >= 0:
+            self.speed_graph_axis.setCurrentIndex(axis_index)
+        self._loading_panel_settings = False
+
+    def _save_panel_settings(self, *_args):
+        if self._loading_panel_settings:
+            return
+        world = self._conditional_stop_world()
+        if world is None:
+            return
+        world.ShowCollisionWireframes = self.collision_chk.isChecked()
+        world.PlaybackSpeed = self.speed_combo.currentText()
+        world.PlaybackLoop = self.loop_chk.isChecked()
+        world.SpeedGraphAxis = self.speed_graph_axis.currentText()
+        world.Document.recompute()
 
     # ── World info ──────────────────────────────────────────────────────────
 

@@ -195,6 +195,9 @@ class MeshSettingsPanel:
         self.generate_button.clicked.connect(self._generate)
         layout.addWidget(self.generate_button)
         layout.addStretch()
+        self.mesher.currentIndexChanged.connect(self._save)
+        self.mesh_size.valueChanged.connect(self._save)
+        self.angle.valueChanged.connect(self._save)
         self.show_collision_mesh.toggled.connect(self._on_show_collision_mesh)
 
     def _save(self):
@@ -202,6 +205,7 @@ class MeshSettingsPanel:
         self._settings.MeshSize = self.mesh_size.value()
         self._settings.AngularDeflection = self.angle.value()
         self._settings.ShowCollisionMesh = self.show_collision_mesh.isChecked()
+        self._settings.Document.recompute()
 
     def _on_show_collision_mesh(self, visible):
         """Show or remove the static collision-mesh preview immediately."""

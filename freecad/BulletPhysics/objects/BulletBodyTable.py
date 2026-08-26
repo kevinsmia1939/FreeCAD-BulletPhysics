@@ -266,6 +266,10 @@ class BodyTablePanel:
     def _selected_rows(self):
         return sorted(set(idx.row() for idx in self.table.selectedIndexes()))
 
+    def _recompute_document(self):
+        if self._rb_list and self._rb_list[0].Document is not None:
+            self._rb_list[0].Document.recompute()
+
     def _on_selection_changed(self):
         rows = self._selected_rows()
         any_mesh = any(self._effective_mesh_type(r) == "mesh" for r in rows)
@@ -288,6 +292,8 @@ class BodyTablePanel:
                 rb.Friction = max(0.0, float(item.text()))
         except ValueError:
             pass
+        else:
+            self._recompute_document()
 
     def _on_shape_combo_changed(self, row):
         if self._updating or row >= len(self._rb_list):
@@ -301,6 +307,7 @@ class BodyTablePanel:
             pass
         self._update_res_cell(row)
         self._on_selection_changed()
+        self._recompute_document()
 
     # ── Bulk apply ──────────────────────────────────────────────────────────
 
@@ -318,6 +325,7 @@ class BodyTablePanel:
                     it.setText(val)
         finally:
             self._updating = False
+        self._recompute_document()
 
     def _apply_density(self):
         try:
@@ -334,6 +342,7 @@ class BodyTablePanel:
                     it.setText(f"{val:.2f}")
         finally:
             self._updating = False
+        self._recompute_document()
 
     def _apply_friction(self):
         try:
@@ -350,6 +359,7 @@ class BodyTablePanel:
                     it.setText(f"{val:.4f}")
         finally:
             self._updating = False
+        self._recompute_document()
 
     def _apply_shape(self):
         val = self.inp_shape.currentText()
@@ -373,6 +383,7 @@ class BodyTablePanel:
         finally:
             self._updating = False
         self._on_selection_changed()
+        self._recompute_document()
 
     def _apply_meshres(self):
         try:
@@ -396,6 +407,7 @@ class BodyTablePanel:
                     it.setText(res_text)
         finally:
             self._updating = False
+        self._recompute_document()
 
     def needsFullSpace(self):
         return True
