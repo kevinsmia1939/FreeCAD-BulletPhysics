@@ -39,6 +39,12 @@ class BulletEmitterFeature:
         obj.addProperty("App::PropertyInteger", "Count", "Emission",
                         "Total number of bodies to emit")
         obj.Count = 1
+        obj.addProperty("App::PropertyBool", "UseParticlesPerSecond", "Emission",
+                        "Emit at a fixed particle rate instead of using count and duration")
+        obj.UseParticlesPerSecond = False
+        obj.addProperty("App::PropertyFloat", "ParticlesPerSecond", "Emission",
+                        "Particle emission rate when rate mode is enabled")
+        obj.ParticlesPerSecond = 1.0
         obj.addProperty("App::PropertyFloat", "StartTime", "Emission",
                         "First emission time in seconds; delay after Start condition when set")
         obj.StartTime = 0.0
@@ -98,6 +104,14 @@ class BulletEmitterFeature:
             obj.addProperty("App::PropertyBool", "Enabled", "Emitter",
                             "Include this emitter in Bullet Physics simulations")
             obj.Enabled = True
+        if not hasattr(obj, "UseParticlesPerSecond"):
+            obj.addProperty("App::PropertyBool", "UseParticlesPerSecond", "Emission",
+                            "Emit at a fixed particle rate instead of using count and duration")
+            obj.UseParticlesPerSecond = False
+        if not hasattr(obj, "ParticlesPerSecond"):
+            obj.addProperty("App::PropertyFloat", "ParticlesPerSecond", "Emission",
+                            "Particle emission rate when rate mode is enabled")
+            obj.ParticlesPerSecond = 1.0
         if not hasattr(obj, "StartConditionObject"):
             obj.addProperty("App::PropertyLink", "StartConditionObject", "Conditions",
                             "Optional shape that starts emission when touched by an active body")
@@ -217,6 +231,13 @@ class EmitterPanel:
         self.count_spin = QtWidgets.QSpinBox()
         self.count_spin.setRange(1, 10000)
         self.count_spin.setValue(max(1, getattr(emitter, "Count", 1)))
+        self.rate_check = QtWidgets.QCheckBox("Use particles per second")
+        self.rate_check.setChecked(getattr(emitter, "UseParticlesPerSecond", False))
+        self.rate_spin = QtWidgets.QDoubleSpinBox()
+        self.rate_spin.setRange(0.001, 100000.0)
+        self.rate_spin.setDecimals(3)
+        self.rate_spin.setSuffix(" particles/s")
+        self.rate_spin.setValue(max(0.001, getattr(emitter, "ParticlesPerSecond", 1.0)))
         orientation_widget, self.orientation_spins = self._vector_input(
             emitter.Orientation, -360.0, 360.0, 2, "Euler angles in degrees")
         orientation_random_widget, self.orientation_random_spins = self._vector_input(
@@ -228,6 +249,8 @@ class EmitterPanel:
         emission_form.addRow(self.enabled_check)
         emission_form.addRow("Emitted body type:", self.type_combo)
         emission_form.addRow("Count:", self.count_spin)
+        emission_form.addRow(self.rate_check)
+        emission_form.addRow("Particles per second:", self.rate_spin)
         emission_form.addRow("Orientation (deg):", orientation_widget)
         emission_form.addRow("Orientation randomness:", orientation_random_widget)
         emission_form.addRow("Random seed:", self.random_seed_spin)
@@ -270,6 +293,8 @@ class EmitterPanel:
         self.enabled_check.toggled.connect(self._save)
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
         self.count_spin.valueChanged.connect(self._save)
+        self.rate_check.toggled.connect(self._on_rate_mode_changed)
+        self.rate_spin.valueChanged.connect(self._save)
         self.start_spin.valueChanged.connect(self._save)
         self.end_spin.valueChanged.connect(self._save)
         for spin in (self.orientation_spins + self.orientation_random_spins
@@ -280,6 +305,7 @@ class EmitterPanel:
         self.velocity_spin.valueChanged.connect(self._save)
         self._update_body_type()
         self._update_condition_controls()
+        self._update_rate_mode()
 
     @staticmethod
     def _vector_input(vector, minimum, maximum, decimals, tooltip):
@@ -438,6 +464,8 @@ class EmitterPanel:
         emitter.Enabled = self.enabled_check.isChecked()
         emitter.BodyType = self.type_combo.currentText()
         emitter.Count = self.count_spin.value()
+        emitter.UseParticlesPerSecond = self.rate_check.isChecked()
+        emitter.ParticlesPerSecond = self.rate_spin.value()
         emitter.StartTime = self.start_spin.value()
         emitter.EndTime = self.end_spin.value()
         emitter.Orientation = self._vector_from_spins(self.orientation_spins)
@@ -460,11 +488,21 @@ class EmitterPanel:
         self._update_condition_controls()
         self._save()
 
+    def _on_rate_mode_changed(self, *_args):
+        self._update_rate_mode()
+        self._save()
+
     def _update_condition_controls(self):
         self.start_condition_value.setCurrentIndex(
             1 if self.start_condition_type_combo.currentText() == "Collision Object" else 0)
         self.end_condition_value.setCurrentIndex(
             1 if self.end_condition_type_combo.currentText() == "Collision Object" else 0)
+
+    def _update_rate_mode(self):
+        rate_mode = self.rate_check.isChecked()
+        self.count_spin.setEnabled(not rate_mode)
+        self.end_spin.setEnabled(not rate_mode)
+        self.rate_spin.setEnabled(rate_mode)
 
     def _update_body_type(self):
         passive = self.type_combo.currentText() == "Passive"

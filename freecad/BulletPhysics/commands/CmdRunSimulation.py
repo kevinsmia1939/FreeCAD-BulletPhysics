@@ -24,6 +24,7 @@ class SimulationPanel:
 
     def __init__(self):
         self.frames = []
+        self.speed_frames = []
         self.time_step = 1.0 / 60.0
         self._playing = False
         self._wireframe_infos = []
@@ -51,13 +52,6 @@ class SimulationPanel:
             self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPlay))
         sim_btn_row.addWidget(self.sim_btn)
 
-        self.stop_sim_btn = QtWidgets.QPushButton("Stop")
-        self.stop_sim_btn.setIcon(
-            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaStop))
-        self.stop_sim_btn.setToolTip("Stop the running simulation and keep frames recorded so far.")
-        self.stop_sim_btn.setEnabled(False)
-        sim_btn_row.addWidget(self.stop_sim_btn)
-
         self.pause_sim_btn = QtWidgets.QPushButton("Pause")
         self.pause_sim_btn.setIcon(
             self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
@@ -65,6 +59,13 @@ class SimulationPanel:
             "Pause Bullet stepping and use playback up to the latest recorded frame.")
         self.pause_sim_btn.setEnabled(False)
         sim_btn_row.addWidget(self.pause_sim_btn)
+
+        self.stop_sim_btn = QtWidgets.QPushButton("Stop")
+        self.stop_sim_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaStop))
+        self.stop_sim_btn.setToolTip("Stop the running simulation and keep frames recorded so far.")
+        self.stop_sim_btn.setEnabled(False)
+        sim_btn_row.addWidget(self.stop_sim_btn)
         sim_layout.addLayout(sim_btn_row)
 
         self.progress = QtWidgets.QProgressBar()
@@ -82,8 +83,17 @@ class SimulationPanel:
             "The selected modelled shape is used as a non-physical contact trigger.")
         self.stop_target_combo = QtWidgets.QComboBox()
         self._populate_stop_targets()
+        self.stop_delay_spin = QtWidgets.QDoubleSpinBox()
+        self.stop_delay_spin.setRange(0.0, 3600.0)
+        self.stop_delay_spin.setDecimals(3)
+        self.stop_delay_spin.setSingleStep(0.1)
+        self.stop_delay_spin.setSuffix(" s")
+        self.stop_delay_spin.setToolTip(
+            "Continue simulating for this duration after the first target contact. "
+            "0 stops immediately.")
         stop_form.addRow(self.stop_on_contact_check)
         stop_form.addRow("Target object:", self.stop_target_combo)
+        stop_form.addRow("Delay after contact:", self.stop_delay_spin)
         sim_layout.addWidget(stop_group)
 
         collision_row = QtWidgets.QHBoxLayout()
@@ -184,6 +194,18 @@ class SimulationPanel:
         play_layout.addWidget(self.bake_btn)
 
         root.addWidget(play_group)
+
+        analysis_group = QtWidgets.QGroupBox("Analysis")
+        analysis_layout = QtWidgets.QHBoxLayout(analysis_group)
+        analysis_layout.addWidget(QtWidgets.QLabel("Speed horizontal axis:"))
+        self.speed_graph_axis = QtWidgets.QComboBox()
+        self.speed_graph_axis.addItems(["Time", "Frame"])
+        analysis_layout.addWidget(self.speed_graph_axis)
+        self.speed_graph_btn = QtWidgets.QPushButton("Show Speed Graph")
+        self.speed_graph_btn.setToolTip(
+            "Open a separate graph of scalar particle speed for every simulated body.")
+        analysis_layout.addWidget(self.speed_graph_btn)
+        root.addWidget(analysis_group)
         root.addStretch()
 
         # ── Timer ─────────────────────────────────────────────────────────────
@@ -198,6 +220,7 @@ class SimulationPanel:
         self.reset_btn.clicked.connect(self._reset)
         self.delete_cache_btn.clicked.connect(self._delete_cache)
         self.bake_btn.clicked.connect(self._bake_frame)
+        self.speed_graph_btn.clicked.connect(self._show_speed_graph)
         self.slider.valueChanged.connect(self._on_slider)
         self.btn_start.clicked.connect(self._go_start)
         self.btn_back.clicked.connect(self._step_back)
@@ -228,12 +251,19 @@ class SimulationPanel:
                 self.stop_target_combo.addItem(obj.Label, obj)
 
     def _update_stop_target_state(self):
-        self.stop_target_combo.setEnabled(self.stop_on_contact_check.isChecked())
+        enabled = self.stop_on_contact_check.isChecked()
+        self.stop_target_combo.setEnabled(enabled)
+        self.stop_delay_spin.setEnabled(enabled)
 
     def _stop_target(self):
         if not self.stop_on_contact_check.isChecked():
             return None
         return self.stop_target_combo.currentData()
+
+    def _stop_delay(self):
+        if not self.stop_on_contact_check.isChecked():
+            return 0.0
+        return self.stop_delay_spin.value()
 
     # ── World info ──────────────────────────────────────────────────────────
 
@@ -280,8 +310,8 @@ class SimulationPanel:
         self.progress.setValue(0)
         self.sim_status.setText("Running…")
 
-        def cb(done, total, frames, time_step):
-            self._update_live_frames(frames, time_step)
+        def cb(done, total, frames, speed_frames, time_step):
+            self._update_live_frames(frames, speed_frames, time_step)
             self.progress.setValue(int(done * 100 / total))
             QtWidgets.QApplication.processEvents()
             while (self._sim_paused and not self._sim_stop_requested
@@ -291,7 +321,10 @@ class SimulationPanel:
             if self._sim_stop_requested or self._closed:
                 return False  # signal run_simulation to break early
 
-        result = run_simulation(callback=cb, stop_on_contact=self._stop_target())
+        result = run_simulation(
+            callback=cb,
+            stop_on_contact=self._stop_target(),
+            stop_delay=self._stop_delay())
         self.sim_btn.setEnabled(True)
         self.stop_sim_btn.setEnabled(False)
         self.pause_sim_btn.setEnabled(False)
@@ -304,9 +337,9 @@ class SimulationPanel:
             self.sim_status.setText("Simulation failed — see Report View.")
             return
 
-        self.frames, self.time_step = result
+        self.frames, self.time_step, self.speed_frames = result
         from ..simulation.BulletSimulation import save_simulation_cache
-        save_simulation_cache(self.frames, self.time_step)
+        save_simulation_cache(self.frames, self.time_step, self.speed_frames)
         self._populate_playback(apply_first_frame=True)
         if self.collision_chk.isChecked():
             self._rebuild_wireframes()
@@ -353,9 +386,10 @@ class SimulationPanel:
             self._disable_live_playback()
             self.sim_status.setText("Running…")
 
-    def _update_live_frames(self, frames, time_step):
+    def _update_live_frames(self, frames, speed_frames, time_step):
         """Expose recorded frames to the slider without altering live Bullet state."""
         self.frames = frames
+        self.speed_frames = speed_frames
         self.time_step = time_step
         last = len(frames) - 1
         self.slider.blockSignals(True)
@@ -384,7 +418,7 @@ class SimulationPanel:
         result = load_simulation_cache()
         if result is None:
             return
-        self.frames, self.time_step = result
+        self.frames, self.time_step, self.speed_frames = result
         self._populate_playback(apply_first_frame=False)
         n = len(self.frames) - 1
         total_secs = n * self.time_step
@@ -568,9 +602,22 @@ class SimulationPanel:
         else:
             self.sim_status.setText("No cache file found.")
 
+    def _show_speed_graph(self):
+        if len(self.frames) < 2:
+            self.sim_status.setText("Run or load a simulation before plotting speed.")
+            return
+        try:
+            from ..simulation.BulletAnalytics import show_speed_plot
+            show_speed_plot(
+                self.frames, self.time_step, self.speed_graph_axis.currentText(),
+                self.speed_frames)
+        except (RuntimeError, ValueError) as exc:
+            QtWidgets.QMessageBox.warning(None, "Speed Graph", str(exc))
+
     def _clear_playback(self, status_msg=""):
         self._stop()
         self.frames = []
+        self.speed_frames = []
         self.time_step = 1.0 / 60.0
         self.slider.setRange(0, 0)
         self.slider.setEnabled(False)

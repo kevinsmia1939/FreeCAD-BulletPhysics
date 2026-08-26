@@ -7,6 +7,16 @@ import tempfile
 import FreeCAD
 
 
+def source_shape_signature(shape):
+    """Return a stable, lightweight signature for generated-mesh validation."""
+    bb = shape.BoundBox
+    return "|".join("{:.9g}".format(value) for value in (
+        shape.Volume, shape.Area,
+        bb.XMin, bb.YMin, bb.ZMin, bb.XMax, bb.YMax, bb.ZMax,
+        len(shape.Vertexes), len(shape.Edges), len(shape.Faces), len(shape.Solids),
+    ))
+
+
 class MeshSettingsFeature:
     """One global meshing configuration shared by every rigid body."""
 
@@ -123,7 +133,11 @@ def generate_meshes(settings):
     for source in unique_sources.values():
         mesh_obj = doc.addObject("Mesh::Feature", f"_BtGlobalMesh_{source.Name}")
         mesh_obj.addProperty("App::PropertyLink", "SourceObject", "Bullet Physics")
+        mesh_obj.addProperty("App::PropertyString", "SourceShapeSignature",
+                             "Bullet Physics",
+                             "Source geometry state when this mesh was generated")
         mesh_obj.SourceObject = source
+        mesh_obj.SourceShapeSignature = source_shape_signature(source.Shape)
         mesh_obj.Label = f"Mesh: {source.Label}"
         mesh_obj.Mesh = _generate_mesh(
             source.Shape, settings.Mesher, mesh_size, angle)

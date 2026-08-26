@@ -1,4 +1,5 @@
 import FreeCAD
+import math
 import random
 
 MM_TO_M = 0.001
@@ -63,6 +64,13 @@ def _mesh_settings_error(rigid_bodies, emitters, doc=None):
         try:
             if mesh_obj.Mesh.CountFacets > 0:
                 sources.add(mesh_obj.SourceObject.Name)
+                from ..objects.BulletMesh import source_shape_signature
+                if (not hasattr(mesh_obj, "SourceShapeSignature")
+                        or mesh_obj.SourceShapeSignature
+                        != source_shape_signature(mesh_obj.SourceObject.Shape)):
+                    return ("Collision mesh for '{}' is stale. "
+                            "Generate meshes again before simulating."
+                            .format(mesh_obj.SourceObject.Label))
         except Exception:
             pass
     source_objects = [body.OriginalObject for body in rigid_bodies]
@@ -186,13 +194,26 @@ def _clear_emitter_links(doc, emitters):
     doc.recompute()
 
 
-def _make_emitter_links(doc, emitters):
+def _emitter_max_count(emitter, simulation_duration):
+    """Return the maximum links needed for one emitter simulation run."""
+    if not getattr(emitter, "UseParticlesPerSecond", False):
+        return max(1, int(getattr(emitter, "Count", 1)))
+    start = max(0.0, getattr(emitter, "StartTime", 0.0))
+    end = max(0.0, getattr(emitter, "EndTime", 0.0))
+    if end <= 0.0:
+        end = simulation_duration
+    duration = max(0.0, end - start)
+    rate = max(0.001, getattr(emitter, "ParticlesPerSecond", 1.0))
+    return max(1, int(math.ceil(rate * duration)))
+
+
+def _make_emitter_links(doc, emitters, simulation_duration):
     """Create hidden playback links for every scheduled emission."""
     result = {}
     for emitter in emitters:
         links = []
         entries = emitter_template_entries(emitter)
-        count = max(1, int(getattr(emitter, "Count", 1)))
+        count = _emitter_max_count(emitter, simulation_duration)
         for index, template in enumerate(_emitter_template_sequence(entries, count)):
             link = doc.addObject("App::Link", f"_BtEmit_{emitter.Name}_{index + 1}")
             link.setLink(template)
@@ -685,16 +706,17 @@ def get_last_stop_reason():
     return _last_stop_reason
 
 
-def run_simulation(callback=None, stop_on_contact=None):
+def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
     """
     Run the Bullet Physics simulation using settings from the BulletWorld object.
 
-    Returns a list of frame dicts (frame[0] = initial state).
-    Each frame maps App::Link.Name → FreeCAD.Placement.
-    Returns None on error.
+    Returns (frames, time_step, speed_frames), or None on error.
+    Each placement frame maps App::Link.Name to FreeCAD.Placement; each speed
+    frame maps the same link names to scalar Bullet linear velocity in m/s.
     """
     global _last_stop_reason
     _last_stop_reason = ""
+    stop_delay = max(0.0, float(stop_delay))
 
     try:
         import sys
@@ -826,7 +848,8 @@ def run_simulation(callback=None, stop_on_contact=None):
                       if ln.TargetBody is not None}
 
     _clear_emitter_links(FreeCAD.ActiveDocument, all_emitters)
-    emitter_links = _make_emitter_links(FreeCAD.ActiveDocument, emitters)
+    emitter_links = _make_emitter_links(
+        FreeCAD.ActiveDocument, emitters, end_time)
 
     # {bullet_id: (body_config_obj, link_obj, local_offset_mm, is_emitted)}
     body_map = {}
@@ -837,6 +860,8 @@ def run_simulation(callback=None, stop_on_contact=None):
     # {bullet_id: (BulletEmitterFeature, "Start" | "Stop")}
     emitter_condition_trigger_ids = {}
     stop_trigger_id = None
+    stop_contact_started_at = None
+    stop_contact_body = ""
 
     for trigger in collect_destroy_bodies():
         source = trigger.SourceObject
@@ -959,7 +984,6 @@ def run_simulation(callback=None, stop_on_contact=None):
 
     def schedule_emitter(emitter, base_step):
         """Schedule an emitter's time window relative to *base_step*."""
-        count = max(1, int(getattr(emitter, "Count", 1)))
         start = max(0.0, getattr(emitter, "StartTime", 0.0))
         end = max(0.0, getattr(emitter, "EndTime", 0.0))
         start_step = base_step + max(0, int(round(start / time_step)))
@@ -973,9 +997,20 @@ def run_simulation(callback=None, stop_on_contact=None):
             end = max(start, end)
             end_step = base_step + max(0, int(round(end / time_step)))
         end_step = max(start_step, min(last_step, end_step))
+        if getattr(emitter, "UseParticlesPerSecond", False):
+            rate = max(0.001, getattr(emitter, "ParticlesPerSecond", 1.0))
+            duration = max(0.0, (end_step - start_step) * time_step)
+            count = max(1, int(math.ceil(rate * duration)))
+        else:
+            count = max(1, int(getattr(emitter, "Count", 1)))
         for index in range(count):
-            step = (start_step if count == 1 else start_step +
-                    (end_step - start_step) * index // (count - 1))
+            if getattr(emitter, "UseParticlesPerSecond", False):
+                step = start_step + int(round(index / (rate * time_step)))
+            else:
+                step = (start_step if count == 1 else start_step +
+                        (end_step - start_step) * index // (count - 1))
+            if step > end_step:
+                break
             emission_schedule.setdefault(step, []).append((emitter, index))
 
     for emitter in emitters:
@@ -1207,9 +1242,17 @@ def run_simulation(callback=None, stop_on_contact=None):
 
         # Frame 0 — initial placements of all Links (before any stepping)
         initial_frame = {}
-        for _, (rb, link, _, _) in body_map.items():
+        initial_speeds = {}
+        for body_id, (rb, link, _, _) in body_map.items():
             initial_frame[link.Name] = link.Placement.copy()
+            if rb.BodyType == "Active":
+                linear, _angular = p.getBaseVelocity(
+                    body_id, physicsClientId=client)
+                initial_speeds[link.Name] = sum(value * value for value in linear) ** 0.5
+            else:
+                initial_speeds[link.Name] = 0.0
         frames = [initial_frame]
+        speed_frames = [initial_speeds]
 
         fired_launchers = set()
         settled_elapsed = 0.0
@@ -1267,10 +1310,23 @@ def run_simulation(callback=None, stop_on_contact=None):
                     )
                     fired_launchers.add(body_id)
 
-            for _ in range(sub_steps):
+            for sub_step in range(sub_steps):
                 p.stepSimulation(physicsClientId=client)
-                conditional_stop_reason = conditional_stop_contact()
-                if conditional_stop_reason:
+                current_time = (step * time_step
+                                + (sub_step + 1) * bullet_tick)
+                if stop_contact_started_at is None:
+                    contacted_body = conditional_stop_contact()
+                    if contacted_body:
+                        stop_contact_started_at = current_time
+                        stop_contact_body = contacted_body
+                        if stop_delay > 0.0:
+                            FreeCAD.Console.PrintMessage(
+                                f"BulletPhysics: '{contacted_body}' touched "
+                                f"'{stop_on_contact.Label}'; stopping in "
+                                f"{stop_delay:.3f} s.\n")
+                if (stop_contact_started_at is not None
+                        and current_time - stop_contact_started_at >= stop_delay):
+                    conditional_stop_reason = stop_contact_body
                     break
                 # Evaluate emission triggers before destruction removes the
                 # contacting Bullet body. This lets a shared target both stop
@@ -1279,11 +1335,15 @@ def run_simulation(callback=None, stop_on_contact=None):
                 destroy_contacted_bodies()
 
             frame = {}
+            speed_frame = {}
             for body_id, (rb, link, local_offset, is_emitted) in body_map.items():
                 if rb.BodyType == "Passive":
                     frame[link.Name] = link.Placement.copy()
+                    speed_frame[link.Name] = 0.0
                     continue
                 pos, orn = p.getBasePositionAndOrientation(
+                    body_id, physicsClientId=client)
+                linear, _angular = p.getBaseVelocity(
                     body_id, physicsClientId=client)
 
                 new_rot = FreeCAD.Rotation(orn[0], orn[1], orn[2], orn[3])
@@ -1294,13 +1354,21 @@ def run_simulation(callback=None, stop_on_contact=None):
                 )
                 new_base = new_world_center - new_rot.multVec(local_offset)
                 frame[link.Name] = FreeCAD.Placement(new_base, new_rot)
+                speed_frame[link.Name] = sum(value * value for value in linear) ** 0.5
 
             frames.append(frame)
+            speed_frames.append(speed_frame)
 
             if conditional_stop_reason:
-                _last_stop_reason = (
-                    f"'{conditional_stop_reason}' touched "
-                    f"'{stop_on_contact.Label}'")
+                if stop_delay > 0.0:
+                    _last_stop_reason = (
+                        f"'{conditional_stop_reason}' touched "
+                        f"'{stop_on_contact.Label}', then waited "
+                        f"{stop_delay:.3f} s")
+                else:
+                    _last_stop_reason = (
+                        f"'{conditional_stop_reason}' touched "
+                        f"'{stop_on_contact.Label}'")
                 FreeCAD.Console.PrintMessage(
                     f"BulletPhysics: simulation stopped because {_last_stop_reason}.\n")
                 break
@@ -1320,12 +1388,12 @@ def run_simulation(callback=None, stop_on_contact=None):
                     break
 
             if callback:
-                if callback(step + 1, steps, frames, time_step) is False:
+                if callback(step + 1, steps, frames, speed_frames, time_step) is False:
                     FreeCAD.Console.PrintMessage(
                         f"BulletPhysics: simulation stopped after {step + 1} frames.\n")
                     break
 
-        return frames, time_step
+        return frames, time_step, speed_frames
 
     finally:
         p.disconnect(client)
@@ -1348,7 +1416,7 @@ def _cache_path(doc=None):
                         f"freecad_bullet_{doc.Name}.json")
 
 
-def save_simulation_cache(frames, time_per_frame, doc=None):
+def save_simulation_cache(frames, time_per_frame, speed_frames=None, doc=None):
     import json
     path = _cache_path(doc)
     if path is None:
@@ -1361,6 +1429,7 @@ def save_simulation_cache(frames, time_per_frame, doc=None):
              for name, pl in frame.items()}
             for frame in frames
         ],
+        "speeds": speed_frames or [],
     }
     with open(path, "w") as f:
         json.dump(data, f)
@@ -1369,7 +1438,7 @@ def save_simulation_cache(frames, time_per_frame, doc=None):
 
 
 def load_simulation_cache(doc=None):
-    """Return (frames, time_per_frame) from the cache file, or None."""
+    """Return (frames, time_per_frame, speed_frames) from the cache file."""
     import json, os
     path = _cache_path(doc)
     if path is None or not os.path.exists(path):
@@ -1391,7 +1460,8 @@ def load_simulation_cache(doc=None):
             frames.append(frame)
         FreeCAD.Console.PrintMessage(
             f"BulletPhysics: loaded simulation cache ← {path}\n")
-        return frames, time_per_frame
+        speed_frames = data.get("speeds", [])
+        return frames, time_per_frame, speed_frames
     except Exception as exc:
         FreeCAD.Console.PrintWarning(
             f"BulletPhysics: could not load cache ({exc})\n")
