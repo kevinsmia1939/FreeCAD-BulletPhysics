@@ -17,6 +17,8 @@ class BulletContainerFeature:
                         "Destroy-rigid-body trigger objects")
         obj.addProperty("App::PropertyLink", "MeshSettings", "Container",
                         "Global mesh settings shared by every rigid body")
+        obj.addProperty("App::PropertyLink", "RunSimulation", "Container",
+                        "Simulation and playback task object")
         obj.Proxy = self
 
     def execute(self, obj):
@@ -32,6 +34,9 @@ class BulletContainerFeature:
         if not hasattr(obj, "MeshSettings"):
             obj.addProperty("App::PropertyLink", "MeshSettings", "Container",
                             "Global mesh settings shared by every rigid body")
+        if not hasattr(obj, "RunSimulation"):
+            obj.addProperty("App::PropertyLink", "RunSimulation", "Container",
+                            "Simulation and playback task object")
 
     def __getstate__(self):
         return None
@@ -69,6 +74,8 @@ class BulletContainerViewProvider:
             children.append(obj.BodyTable)
         if hasattr(obj, "MeshSettings") and obj.MeshSettings is not None:
             children.append(obj.MeshSettings)
+        if hasattr(obj, "RunSimulation") and obj.RunSimulation is not None:
+            children.append(obj.RunSimulation)
         if hasattr(obj, "RigidBodies"):
             children.extend(rb for rb in obj.RigidBodies if rb is not None)
         if hasattr(obj, "Launchers"):
@@ -141,6 +148,8 @@ def make_container(doc=None):
 
     from .BulletWorld import BulletWorldFeature, BulletWorldViewProvider
     from .BulletBodyTable import make_body_table
+    from .BulletMesh import make_mesh_settings
+    from .BulletRunSimulation import make_run_simulation
 
     # Container
     container = doc.addObject("App::FeaturePython", "BulletPhysics")
@@ -156,6 +165,9 @@ def make_container(doc=None):
     # Body summary table inside container
     table = make_body_table(doc)
     container.BodyTable = table
+
+    make_mesh_settings(container)
+    make_run_simulation(container)
 
     if FreeCAD.GuiUp:
         import FreeCADGui

@@ -66,7 +66,8 @@ def _mesh_settings_error(rigid_bodies, emitters, doc=None):
         except Exception:
             pass
     source_objects = [body.OriginalObject for body in rigid_bodies]
-    source_objects.extend(emitter.TemplateObject for emitter in emitters)
+    source_objects.extend(template for emitter in emitters
+                          for template, _ratio in emitter_template_entries(emitter))
     missing = [source.Label for source in source_objects if source.Name not in sources]
     if missing:
         return "Missing generated meshes for: " + ", ".join(missing)
@@ -105,18 +106,41 @@ def collect_emitters(doc=None, enabled_only=True):
     result = []
     for obj in doc.Objects:
         source = getattr(obj, "EmissionSource", None)
-        template = getattr(obj, "TemplateObject", None)
+        templates = [template for template, _ratio in emitter_template_entries(obj)]
         if (hasattr(obj, "Proxy")
                 and type(obj.Proxy).__name__ == "BulletEmitterFeature"
                 and (not enabled_only or getattr(obj, "Enabled", True))
                 and source is not None
-                and template is not None
+                and templates
                 and hasattr(source, "Shape")
                 and source.Shape is not None
-                and hasattr(template, "Shape")
-                and template.Shape is not None):
+                and all(hasattr(template, "Shape") and template.Shape is not None
+                        for template in templates)):
             result.append(obj)
     return result
+
+
+def emitter_template_entries(emitter):
+    """Return (template, percentage) pairs, including old single-template emitters."""
+    templates = [template for template in getattr(emitter, "TemplateObjects", [])
+                 if template is not None]
+    if not templates:
+        template = getattr(emitter, "TemplateObject", None)
+        templates = [template] if template is not None else []
+    ratios = list(getattr(emitter, "TemplateRatios", []))
+    if len(ratios) != len(templates):
+        ratios = [100.0] if len(templates) == 1 else [0.0] * len(templates)
+    return list(zip(templates, ratios))
+
+
+def _emitter_template_ratio_error(emitters):
+    for emitter in emitters:
+        entries = emitter_template_entries(emitter)
+        total = sum(max(0.0, ratio) for _template, ratio in entries)
+        if not entries or abs(total - 100.0) > 1e-6:
+            return (f"Emission ratios for '{emitter.Label}' must total 100%."
+                    " Edit the emitter and set the percentage for each object.")
+    return ""
 
 
 def _all_emitters(doc=None):
@@ -167,19 +191,40 @@ def _make_emitter_links(doc, emitters):
     result = {}
     for emitter in emitters:
         links = []
-        template = emitter.TemplateObject
+        entries = emitter_template_entries(emitter)
         count = max(1, int(getattr(emitter, "Count", 1)))
-        for index in range(count):
+        for index, template in enumerate(_emitter_template_sequence(entries, count)):
             link = doc.addObject("App::Link", f"_BtEmit_{emitter.Name}_{index + 1}")
             link.setLink(template)
             link.Label = f"Emission {index + 1}: {template.Label}"
             if FreeCAD.GuiUp:
                 link.ViewObject.Visibility = False
-            links.append(link)
-        emitter.GeneratedLinks = links
+            links.append((link, template))
+        emitter.GeneratedLinks = [link for link, _template in links]
         result[emitter.Name] = links
     doc.recompute()
     return result
+
+
+def _emitter_template_sequence(entries, count):
+    """Yield a deterministic repeating sequence matching the configured ratios."""
+    if len(entries) == 1:
+        return [entries[0][0]] * count
+
+    # Smooth weighted round-robin spreads each template uniformly rather than
+    # emitting one ratio block at a time.  At 50% / 50% this yields A, B, A, B.
+    weighted = [(template, int(round(max(0.0, ratio) * 1000)))
+                for template, ratio in entries]
+    total_weight = sum(weight for _template, weight in weighted)
+    current_weights = [0] * len(weighted)
+    sequence = []
+    for _ in range(count):
+        for index, (_template, weight) in enumerate(weighted):
+            current_weights[index] += weight
+        selected = max(range(len(weighted)), key=current_weights.__getitem__)
+        current_weights[selected] -= total_weight
+        sequence.append(weighted[selected][0])
+    return sequence
 
 
 def _sample_emission_point(shape, rng):
@@ -231,6 +276,19 @@ def _emitter_rotation(emitter, rng):
         orientation.x + rng.uniform(-variation[0], variation[0]),
         orientation.y + rng.uniform(-variation[1], variation[1]),
         orientation.z + rng.uniform(-variation[2], variation[2]),
+    )
+
+
+def _emitter_direction(emitter, rng):
+    direction = getattr(emitter, "Direction", FreeCAD.Vector(0, 0, 1))
+    randomness = getattr(emitter, "DirectionRandomness", FreeCAD.Vector())
+    return FreeCAD.Vector(
+        direction.x + rng.uniform(-max(0.0, min(1.0, randomness.x)),
+                                max(0.0, min(1.0, randomness.x))),
+        direction.y + rng.uniform(-max(0.0, min(1.0, randomness.y)),
+                                max(0.0, min(1.0, randomness.y))),
+        direction.z + rng.uniform(-max(0.0, min(1.0, randomness.z)),
+                                max(0.0, min(1.0, randomness.z))),
     )
 
 
@@ -664,13 +722,30 @@ def run_simulation(callback=None, stop_on_contact=None):
             "Add Active/Passive rigid bodies or configure an emitter first.\n"
         )
         return None
-    if rigid_bodies or emitters:
-        mesh_error = _mesh_settings_error(rigid_bodies, emitters)
-        if mesh_error:
+    ratio_error = _emitter_template_ratio_error(emitters)
+    if ratio_error:
+        FreeCAD.Console.PrintWarning(f"BulletPhysics: {ratio_error}\n")
+        return None
+    mesh_settings = _find_mesh_settings()
+    if mesh_settings is None:
+        FreeCAD.Console.PrintWarning(
+            "BulletPhysics: No global Mesh object found. Use Mesh Rigid Bodies first.\n")
+        return None
+    mesh_error = _mesh_settings_error(rigid_bodies, emitters)
+    if mesh_error:
+        try:
+            from ..objects.BulletMesh import generate_meshes
+            generated_count = generate_meshes(mesh_settings)
+            FreeCAD.Console.PrintMessage(
+                f"BulletPhysics: refreshed {generated_count} global mesh(es).\n")
+            mesh_error = _mesh_settings_error(rigid_bodies, emitters)
+        except Exception as exc:
             FreeCAD.Console.PrintWarning(
-                f"BulletPhysics: {mesh_error}\n")
+                f"BulletPhysics: could not generate global meshes ({exc}).\n")
             return None
-        mesh_settings = _find_mesh_settings()
+    if mesh_error:
+        FreeCAD.Console.PrintWarning(f"BulletPhysics: {mesh_error}\n")
+        return None
 
     # --- Physics World settings ---
     world = find_world()
@@ -686,7 +761,7 @@ def run_simulation(callback=None, stop_on_contact=None):
         time_step        = world.TimeStep
         solver_iters     = world.SolverIterations
         sub_steps        = max(1, getattr(world, "SubSteps", 4))
-        mesh_resolution  = max(0.001, getattr(world, "MeshResolution", 1.0))
+        mesh_resolution  = 1.0
         collision_margin = max(0.0, getattr(world, "CollisionMargin", 0.001))
         linear_damping   = max(0.0, min(1.0, getattr(world, "LinearDamping", 0.0)))
         angular_damping  = max(0.0, min(1.0, getattr(world, "AngularDamping", 0.0)))
@@ -786,10 +861,17 @@ def run_simulation(callback=None, stop_on_contact=None):
         )
         destroy_trigger_ids[trigger_id] = trigger
 
+    def emitter_condition_type(emitter, name, source):
+        """Return the selected condition mode, including pre-mode documents."""
+        default = "Collision Object" if source is not None else "Time"
+        return getattr(emitter, f"{name}ConditionType", default)
+
     for emitter in emitters:
         for condition_type, source in (
                 ("Start", getattr(emitter, "StartConditionObject", None)),
-                ("Stop", getattr(emitter, "StopConditionObject", None))):
+                ("End", getattr(emitter, "StopConditionObject", None))):
+            if emitter_condition_type(emitter, condition_type, source) != "Collision Object":
+                continue
             if source is None or not hasattr(source, "Shape") or source.Shape is None:
                 continue
             shape = source.Shape
@@ -837,31 +919,39 @@ def run_simulation(callback=None, stop_on_contact=None):
         )
 
     emitter_configs = {}
-    rng = random.Random()
+    emitter_rngs = {}
 
     for emitter in emitters:
-        template = emitter.TemplateObject
-        template_shape = template.Shape
-        template_pl = template.Placement
-        bb = template_shape.BoundBox
-        template_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
-        half_mm = _local_half_extents(template_shape, template_pl)
-        half = [value * MM_TO_M for value in half_mm]
-        is_static = emitter.BodyType == "Passive"
-        col, characteristic_radius = _make_collision_shape(
-            p, template_shape, half, template_pl, template_center, client,
-            is_static=is_static, mesh_resolution=mesh_resolution,
-            collision_margin=collision_margin,
-            source_mesh=_generated_mesh_for_source(mesh_settings, template))
-        local_offset = template_pl.Rotation.inverted().multVec(
-            template_center - template_pl.Base)
-        density = max(0.0, getattr(emitter, "Density", 1000.0))
-        mass = 0.0 if is_static else density * template_shape.Volume * 1e-9
-        emitter_configs[emitter.Name] = (
-            col, characteristic_radius, mass, local_offset,
-            max(0.0, getattr(emitter, "Restitution", 0.3)),
-            max(0.0, getattr(emitter, "Friction", 0.5)),
+        seed = max(0, int(getattr(emitter, "RandomSeed", 0)))
+        direction_seed = max(0, int(getattr(emitter, "DirectionRandomSeed", 0)))
+        emitter_rngs[emitter.Name] = (
+            random.Random(seed if seed else None),
+            random.Random(direction_seed if direction_seed else None),
         )
+        configs = {}
+        is_static = emitter.BodyType == "Passive"
+        density = max(0.0, getattr(emitter, "Density", 1000.0))
+        for template, _ratio in emitter_template_entries(emitter):
+            template_shape = template.Shape
+            template_pl = template.Placement
+            bb = template_shape.BoundBox
+            template_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+            half_mm = _local_half_extents(template_shape, template_pl)
+            half = [value * MM_TO_M for value in half_mm]
+            col, characteristic_radius = _make_collision_shape(
+                p, template_shape, half, template_pl, template_center, client,
+                is_static=is_static, mesh_resolution=mesh_resolution,
+                collision_margin=collision_margin,
+                source_mesh=_generated_mesh_for_source(mesh_settings, template))
+            local_offset = template_pl.Rotation.inverted().multVec(
+                template_center - template_pl.Base)
+            mass = 0.0 if is_static else density * template_shape.Volume * 1e-9
+            configs[template.Name] = (
+                col, characteristic_radius, mass, local_offset,
+                max(0.0, getattr(emitter, "Restitution", 0.3)),
+                max(0.0, getattr(emitter, "Friction", 0.5)),
+            )
+        emitter_configs[emitter.Name] = configs
 
     emission_schedule = {}
     started_emitters = set()
@@ -871,21 +961,34 @@ def run_simulation(callback=None, stop_on_contact=None):
         """Schedule an emitter's time window relative to *base_step*."""
         count = max(1, int(getattr(emitter, "Count", 1)))
         start = max(0.0, getattr(emitter, "StartTime", 0.0))
-        end = max(start, getattr(emitter, "EndTime", start))
+        end = max(0.0, getattr(emitter, "EndTime", 0.0))
+        start_step = base_step + max(0, int(round(start / time_step)))
+        last_step = max(0, steps - 1)
+        # An end time of zero is an open emission window.  Its configured
+        # count is distributed through the remaining simulation frames; only
+        # simulation completion or an end collision can stop it earlier.
+        if end <= 0.0:
+            end_step = last_step
+        else:
+            end = max(start, end)
+            end_step = base_step + max(0, int(round(end / time_step)))
+        end_step = max(start_step, min(last_step, end_step))
         for index in range(count):
-            time = start if count == 1 else start + (end - start) * index / (count - 1)
-            step = base_step + max(0, int(round(time / time_step)))
+            step = (start_step if count == 1 else start_step +
+                    (end_step - start_step) * index // (count - 1))
             emission_schedule.setdefault(step, []).append((emitter, index))
 
     for emitter in emitters:
-        if getattr(emitter, "StartConditionObject", None) is None:
+        start_source = getattr(emitter, "StartConditionObject", None)
+        if emitter_condition_type(emitter, "Start", start_source) != "Collision Object":
             schedule_emitter(emitter, 0)
             started_emitters.add(emitter.Name)
 
     def spawn_emission(emitter, index):
-        link = emitter_links[emitter.Name][index]
+        rng, direction_rng = emitter_rngs[emitter.Name]
+        link, template = emitter_links[emitter.Name][index]
         (col, characteristic_radius, mass, local_offset,
-         restitution, friction) = emitter_configs[emitter.Name]
+         restitution, friction) = emitter_configs[emitter.Name][template.Name]
         center = _sample_emission_point(emitter.EmissionSource.Shape, rng)
         rotation = _emitter_rotation(emitter, rng)
         body_id = p.createMultiBody(
@@ -911,7 +1014,7 @@ def run_simulation(callback=None, stop_on_contact=None):
                 angularDamping=angular_damping,
                 physicsClientId=client,
             )
-            direction = getattr(emitter, "Direction", FreeCAD.Vector(0, 0, 1))
+            direction = _emitter_direction(emitter, direction_rng)
             length = (direction.x**2 + direction.y**2 + direction.z**2) ** 0.5
             if length > 1e-9:
                 speed = max(0.0, getattr(emitter, "Velocity", 0.0))
@@ -988,7 +1091,7 @@ def run_simulation(callback=None, stop_on_contact=None):
                         f"emitter '{emitter.Label}' started by "
                         f"'{emitter.StartConditionObject.Label}'.")
                 started_emitters.add(emitter.Name)
-            elif condition_type == "Stop" and emitter.Name not in stopped_emitters:
+            elif condition_type == "End" and emitter.Name not in stopped_emitters:
                 stopped_emitters.add(emitter.Name)
                 _report_event(
                     f"emitter '{emitter.Label}' stopped by "
@@ -1024,8 +1127,7 @@ def run_simulation(callback=None, stop_on_contact=None):
                         world_center.z * MM_TO_M]
 
             is_static = (rb.BodyType == "Passive")
-            body_res  = getattr(rb, "MeshResolution", 0.0)
-            effective_res = body_res if body_res > 0 else mesh_resolution
+            effective_res = mesh_resolution
             override = getattr(rb, "ShapeOverride", "Auto")
             forced_type = None if override == "Auto" else override
             col, characteristic_radius = _make_collision_shape(
@@ -1218,7 +1320,7 @@ def run_simulation(callback=None, stop_on_contact=None):
                     break
 
             if callback:
-                if callback(step + 1, steps) is False:
+                if callback(step + 1, steps, frames, time_step) is False:
                     FreeCAD.Console.PrintMessage(
                         f"BulletPhysics: simulation stopped after {step + 1} frames.\n")
                     break
@@ -1493,11 +1595,37 @@ def create_collision_mesh_displays(doc=None):
     if doc is None:
         doc = FreeCAD.ActiveDocument
 
-    from ..objects.BulletWorld import find_world
-    world     = find_world(doc)
-    world_res = max(0.001, getattr(world, "MeshResolution", 1.0)) if world else 1.0
+    mesh_settings = _find_mesh_settings(doc)
+    mesh_res = max(0.001, getattr(mesh_settings, "MeshSize", 1.0))
 
     result = []
+
+    def add_display(fc_shape, orig_pl, label, link_name):
+        """Create one orange display mesh in the same local frame as a Link."""
+        import Mesh as _Mesh
+
+        bb = fc_shape.BoundBox
+        world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+        inv_rot = orig_pl.Rotation.inverted()
+        local_offset = inv_rot.multVec(world_center - orig_pl.Base)
+        verts_world, tri_faces = fc_shape.tessellate(mesh_res)
+        verts_local = [inv_rot.multVec(FreeCAD.Vector(
+            vertex.x - world_center.x,
+            vertex.y - world_center.y,
+            vertex.z - world_center.z)) for vertex in verts_world]
+        triangles = [(verts_local[i0], verts_local[i1], verts_local[i2])
+                     for i0, i1, i2 in tri_faces]
+        obj = doc.addObject("Mesh::Feature", f"_BtCollisionMesh_{link_name}")
+        obj.Label = f"Collision Mesh: {label}"
+        obj.Mesh = _Mesh.Mesh(triangles)
+        obj.Placement = FreeCAD.Placement(world_center, orig_pl.Rotation)
+        if FreeCAD.GuiUp:
+            vobj = obj.ViewObject
+            vobj.DisplayMode = "Wireframe"
+            vobj.LineColor = (1.0, 0.5, 0.0)
+            vobj.LineWidth = 1.0
+            vobj.Selectable = False
+        result.append((obj, link_name, local_offset))
 
     for rb in collect_rigid_bodies(doc):
         override = getattr(rb, "ShapeOverride", "Auto")
@@ -1510,55 +1638,28 @@ def create_collision_mesh_displays(doc=None):
         if eff_type not in ("mesh", "convex_hull"):
             continue
 
-        body_res = getattr(rb, "MeshResolution", 0.0)
-        mesh_res = body_res if body_res > 0.0 else world_res
-
         try:
-            import Mesh as _Mesh
-
-            # Tessellate in world space (same as the physics code), then
-            # transform vertices to bbox-centre-relative local space (mm).
-            # This avoids the ambiguity of fc_shape.copy().tessellate() which
-            # may return world-space vertices for PartDesign bodies.
-            bb          = fc_shape.BoundBox
-            world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
-            inv_rot     = orig_pl.Rotation.inverted()
-            local_offset = inv_rot.multVec(world_center - orig_pl.Base)
-
-            verts_world, tri_faces = fc_shape.tessellate(mesh_res)
-
-            verts_local = []
-            for v in verts_world:
-                rel = FreeCAD.Vector(v.x - world_center.x,
-                                     v.y - world_center.y,
-                                     v.z - world_center.z)
-                verts_local.append(inv_rot.multVec(rel))
-
-            triangles = [(verts_local[i0], verts_local[i1], verts_local[i2])
-                         for i0, i1, i2 in tri_faces]
-            mesh = _Mesh.Mesh(triangles)
-
-            obj = doc.addObject("Mesh::Feature", f"_BtMesh_{rb.Label}")
-            obj.Label    = f"Collision Mesh: {rb.Label}"
-            obj.Mesh     = mesh
-            # Vertices are centred at bbox centre in body-local orientation;
-            # place the mesh so that centre lands at world_center.
-            obj.Placement = FreeCAD.Placement(world_center, orig_pl.Rotation)
-
-            if FreeCAD.GuiUp:
-                import FreeCADGui
-                vobj = obj.ViewObject
-                vobj.DisplayMode = "Wireframe"
-                vobj.LineColor   = (1.0, 0.5, 0.0)   # orange
-                vobj.LineWidth   = 1.0
-                vobj.Selectable  = False
-
-            result.append((obj, rb.BodyLink.Name, local_offset))
+            add_display(fc_shape, orig_pl, rb.Label, rb.BodyLink.Name)
 
         except Exception as exc:
             FreeCAD.Console.PrintWarning(
                 f"BulletPhysics: mesh display failed for {rb.Label}: {exc}\n"
             )
+
+    # Emitter links share the template's collision shape but have independent
+    # placements and visibility during playback, so each link gets a display.
+    for emitter in collect_emitters(doc):
+        for link in getattr(emitter, "GeneratedLinks", []):
+            if link is None:
+                continue
+            template = getattr(link, "LinkedObject", None)
+            if template is None:
+                template = emitter.TemplateObject
+            try:
+                add_display(template.Shape, template.Placement, link.Label, link.Name)
+            except Exception as exc:
+                FreeCAD.Console.PrintWarning(
+                    f"BulletPhysics: mesh display failed for {link.Label}: {exc}\n")
 
     doc.recompute()
     return result
@@ -1568,11 +1669,15 @@ def update_collision_mesh_displays(mesh_infos, frame):
     """Reposition each mesh display to match the given simulation frame."""
     for (obj, link_name, local_offset) in mesh_infos:
         if link_name not in frame:
+            if FreeCAD.GuiUp:
+                obj.ViewObject.Visibility = False
             continue
         link_pl = frame[link_name]
         # Recover the bbox world centre from the link placement + stored offset.
         new_world_center = link_pl.Base + link_pl.Rotation.multVec(local_offset)
         obj.Placement = FreeCAD.Placement(new_world_center, link_pl.Rotation)
+        if FreeCAD.GuiUp:
+            obj.ViewObject.Visibility = True
 
 
 def remove_collision_mesh_displays(mesh_infos, doc=None):
@@ -1589,12 +1694,15 @@ def remove_collision_mesh_displays(mesh_infos, doc=None):
 
 
 def cleanup_stale_mesh_displays(doc=None):
-    """Remove any leftover _BtMesh_ objects (e.g. from a previous crash)."""
+    """Remove leftover collision-mesh displays without deleting global meshes."""
     if doc is None:
         doc = FreeCAD.ActiveDocument
     if doc is None:
         return
-    stale = [o for o in doc.Objects if o.Name.startswith("_BtMesh_")]
+    stale = [o for o in doc.Objects
+             if (o.Name.startswith("_BtCollisionMesh_")
+                 or (o.Name.startswith("_BtMesh_")
+                     and not hasattr(o, "SourceObject")))]
     for o in stale:
         doc.removeObject(o.Name)
     if stale:

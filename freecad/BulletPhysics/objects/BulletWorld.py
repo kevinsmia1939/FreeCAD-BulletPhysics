@@ -32,12 +32,6 @@ class BulletWorldFeature:
                         "at the cost of simulation time (default 4)")
         obj.SubSteps = 4
 
-        obj.addProperty("App::PropertyFloat", "MeshResolution", "Simulation",
-                        "Tessellation chord deviation in mm for custom (non-primitive) "
-                        "collision shapes. Smaller = finer mesh, more accurate but slower. "
-                        "Primitives (box, sphere, cylinder) are unaffected.")
-        obj.MeshResolution = 1.0
-
         obj.addProperty("App::PropertyFloat", "CollisionMargin", "Simulation",
                         "Bullet collision margin in metres applied to every collision shape. "
                         "Smaller values let objects appear to touch. "
@@ -87,12 +81,6 @@ class BulletWorldFeature:
                             "Higher values prevent objects passing through each other "
                             "at the cost of simulation time (default 4)")
             obj.SubSteps = 4
-        if not hasattr(obj, "MeshResolution"):
-            obj.addProperty("App::PropertyFloat", "MeshResolution", "Simulation",
-                            "Tessellation chord deviation in mm for custom (non-primitive) "
-                            "collision shapes. Smaller = finer mesh, more accurate but slower. "
-                            "Primitives (box, sphere, cylinder) are unaffected.")
-            obj.MeshResolution = 1.0
         if not hasattr(obj, "LinearDamping"):
             obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                             "Air damping applied to linear (translational) velocity of active "
@@ -243,17 +231,6 @@ class WorldSettingsPanel:
         self.inp_substeps.setValue(getattr(world_obj, "SubSteps", 4))
         sim_form.addRow("Sub Steps:", self.inp_substeps)
 
-        self.inp_meshres = QtWidgets.QDoubleSpinBox()
-        self.inp_meshres.setRange(0.001, 100.0)
-        self.inp_meshres.setDecimals(3)
-        self.inp_meshres.setSuffix(" mm")
-        self.inp_meshres.setToolTip(
-            "Tessellation chord deviation for custom mesh collision shapes.\n"
-            "Smaller = finer mesh, more accurate but slower.\n"
-            "Primitives (box, sphere, cylinder) are unaffected.")
-        self.inp_meshres.setValue(getattr(world_obj, "MeshResolution", 1.0))
-        sim_form.addRow("Mesh Resolution:", self.inp_meshres)
-
         self.inp_margin = QtWidgets.QDoubleSpinBox()
         self.inp_margin.setRange(0.0, 1.0)
         self.inp_margin.setDecimals(4)
@@ -314,7 +291,6 @@ class WorldSettingsPanel:
         self.inp_timestep.valueChanged.connect(self._apply)
         self.inp_solver.valueChanged.connect(self._apply)
         self.inp_substeps.valueChanged.connect(self._apply)
-        self.inp_meshres.valueChanged.connect(self._apply)
         self.inp_margin.valueChanged.connect(self._apply)
         self.inp_stop_when_settled.toggled.connect(self._update_settle_controls)
         self.inp_stop_when_settled.toggled.connect(self._apply)
@@ -340,7 +316,6 @@ class WorldSettingsPanel:
         obj.TimeStep         = self.inp_timestep.value()
         obj.SolverIterations = self.inp_solver.value()
         obj.SubSteps         = self.inp_substeps.value()
-        obj.MeshResolution   = self.inp_meshres.value()
         obj.CollisionMargin  = self.inp_margin.value()
         obj.StopWhenSettled = self.inp_stop_when_settled.isChecked()
         obj.SettleLinearVelocity = self.inp_settle_linear.value()

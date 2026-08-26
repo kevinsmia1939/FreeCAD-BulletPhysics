@@ -29,6 +29,7 @@ class SimulationPanel:
         self._wireframe_infos = []
         self._mesh_infos = []
         self._sim_stop_requested = False
+        self._sim_paused = False
         self._closed = False
 
         self.form = QtWidgets.QWidget()
@@ -56,6 +57,14 @@ class SimulationPanel:
         self.stop_sim_btn.setToolTip("Stop the running simulation and keep frames recorded so far.")
         self.stop_sim_btn.setEnabled(False)
         sim_btn_row.addWidget(self.stop_sim_btn)
+
+        self.pause_sim_btn = QtWidgets.QPushButton("Pause")
+        self.pause_sim_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
+        self.pause_sim_btn.setToolTip(
+            "Pause Bullet stepping and use playback up to the latest recorded frame.")
+        self.pause_sim_btn.setEnabled(False)
+        sim_btn_row.addWidget(self.pause_sim_btn)
         sim_layout.addLayout(sim_btn_row)
 
         self.progress = QtWidgets.QProgressBar()
@@ -91,20 +100,6 @@ class SimulationPanel:
         self.refresh_collision_btn.setEnabled(False)
         collision_row.addWidget(self.refresh_collision_btn)
         sim_layout.addLayout(collision_row)
-
-        mesh_row = QtWidgets.QHBoxLayout()
-        self.mesh_chk = QtWidgets.QCheckBox("Show Collision Mesh")
-        self.mesh_chk.setToolTip(
-            "Display orange wireframe of the actual tessellated triangle mesh\n"
-            "used for collision detection.  Only shown for bodies whose collision\n"
-            "shape is 'mesh' or 'convex_hull' — primitives are skipped.")
-        mesh_row.addWidget(self.mesh_chk)
-        self.refresh_mesh_btn = QtWidgets.QPushButton("Refresh")
-        self.refresh_mesh_btn.setToolTip(
-            "Rebuild collision mesh displays from the current solid positions.")
-        self.refresh_mesh_btn.setEnabled(False)
-        mesh_row.addWidget(self.refresh_mesh_btn)
-        sim_layout.addLayout(mesh_row)
 
         root.addWidget(sim_group)
 
@@ -199,6 +194,7 @@ class SimulationPanel:
         # ── Wiring ────────────────────────────────────────────────────────────
         self.sim_btn.clicked.connect(self._run_simulation)
         self.stop_sim_btn.clicked.connect(self._stop_simulation)
+        self.pause_sim_btn.clicked.connect(self._toggle_simulation_pause)
         self.reset_btn.clicked.connect(self._reset)
         self.delete_cache_btn.clicked.connect(self._delete_cache)
         self.bake_btn.clicked.connect(self._bake_frame)
@@ -212,8 +208,6 @@ class SimulationPanel:
 
         self.collision_chk.stateChanged.connect(self._on_collision_chk)
         self.refresh_collision_btn.clicked.connect(self._rebuild_wireframes)
-        self.mesh_chk.stateChanged.connect(self._on_mesh_chk)
-        self.refresh_mesh_btn.clicked.connect(self._rebuild_mesh_displays)
         self.stop_on_contact_check.toggled.connect(self._update_stop_target_state)
         self._update_stop_target_state()
 
@@ -223,6 +217,8 @@ class SimulationPanel:
         cleanup_stale_wireframes()
         cleanup_stale_mesh_displays()
         self._try_load_cache()
+        if self._show_collision_mesh():
+            self._rebuild_mesh_displays()
 
     def _populate_stop_targets(self):
         self.stop_target_combo.clear()
@@ -272,22 +268,39 @@ class SimulationPanel:
         self._stop()
         self._refresh_world_label()
         self._sim_stop_requested = False
+        self._sim_paused = False
         self.sim_btn.setEnabled(False)
         self.stop_sim_btn.setEnabled(True)
+        self.pause_sim_btn.setEnabled(True)
+        self.pause_sim_btn.setText("Pause")
+        self.pause_sim_btn.setIcon(
+            self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
+        for button in (self.reset_btn, self.delete_cache_btn, self.bake_btn):
+            button.setEnabled(False)
         self.progress.setValue(0)
         self.sim_status.setText("Running…")
 
-        def cb(done, total):
+        def cb(done, total, frames, time_step):
+            self._update_live_frames(frames, time_step)
             self.progress.setValue(int(done * 100 / total))
             QtWidgets.QApplication.processEvents()
-            if self._sim_stop_requested:
+            while (self._sim_paused and not self._sim_stop_requested
+                   and not self._closed):
+                QtWidgets.QApplication.processEvents()
+                QtCore.QThread.msleep(15)
+            if self._sim_stop_requested or self._closed:
                 return False  # signal run_simulation to break early
 
         result = run_simulation(callback=cb, stop_on_contact=self._stop_target())
         self.sim_btn.setEnabled(True)
         self.stop_sim_btn.setEnabled(False)
+        self.pause_sim_btn.setEnabled(False)
+        self._sim_paused = False
 
         if not result:
+            self.reset_btn.setEnabled(True)
+            self.delete_cache_btn.setEnabled(True)
+            self.bake_btn.setEnabled(bool(self.frames))
             self.sim_status.setText("Simulation failed — see Report View.")
             return
 
@@ -297,7 +310,7 @@ class SimulationPanel:
         self._populate_playback(apply_first_frame=True)
         if self.collision_chk.isChecked():
             self._rebuild_wireframes()
-        if self.mesh_chk.isChecked():
+        if self._show_collision_mesh():
             self._rebuild_mesh_displays()
         n = len(self.frames) - 1
         total_secs = n * self.time_step
@@ -313,8 +326,58 @@ class SimulationPanel:
 
     def _stop_simulation(self):
         self._sim_stop_requested = True
+        self._sim_paused = False
         self.stop_sim_btn.setEnabled(False)
+        self.pause_sim_btn.setEnabled(False)
         self.sim_status.setText("Stopping…")
+
+    def _toggle_simulation_pause(self):
+        self._sim_paused = not self._sim_paused
+        if self._sim_paused:
+            self._stop()
+            self.pause_sim_btn.setText("Continue")
+            self.pause_sim_btn.setIcon(
+                self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPlay))
+            self._enable_live_playback()
+            last = len(self.frames) - 1
+            if last >= 0:
+                self.slider.setValue(last)
+                self._on_slider(last)
+            self.sim_status.setText(
+                f"Paused at frame {max(0, last)}. Use playback, then press Continue.")
+        else:
+            self._stop()
+            self.pause_sim_btn.setText("Pause")
+            self.pause_sim_btn.setIcon(
+                self.form.style().standardIcon(QtWidgets.QStyle.SP_MediaPause))
+            self._disable_live_playback()
+            self.sim_status.setText("Running…")
+
+    def _update_live_frames(self, frames, time_step):
+        """Expose recorded frames to the slider without altering live Bullet state."""
+        self.frames = frames
+        self.time_step = time_step
+        last = len(frames) - 1
+        self.slider.blockSignals(True)
+        self.slider.setRange(0, max(0, last))
+        self.slider.setValue(max(0, last))
+        self.slider.blockSignals(False)
+        self._update_frame_label(max(0, last))
+
+    def _enable_live_playback(self):
+        self.slider.setEnabled(bool(self.frames))
+        self.speed_combo.setEnabled(bool(self.frames))
+        for button in (self.btn_start, self.btn_back, self.btn_play,
+                       self.btn_forward, self.btn_end):
+            button.setEnabled(bool(self.frames))
+
+    def _disable_live_playback(self):
+        self._stop()
+        self.slider.setEnabled(False)
+        self.speed_combo.setEnabled(False)
+        for button in (self.btn_start, self.btn_back, self.btn_play,
+                       self.btn_forward, self.btn_end):
+            button.setEnabled(False)
 
     def _try_load_cache(self):
         from ..simulation.BulletSimulation import load_simulation_cache
@@ -341,6 +404,8 @@ class SimulationPanel:
                     self.btn_forward, self.btn_end):
             btn.setEnabled(True)
         self.bake_btn.setEnabled(True)
+        self.reset_btn.setEnabled(True)
+        self.delete_cache_btn.setEnabled(True)
         self._update_frame_label(0)
 
     # ── Playback helpers ────────────────────────────────────────────────────
@@ -555,7 +620,8 @@ class SimulationPanel:
         self._hide_wireframes()
         self.collision_chk.setChecked(False)
         self._hide_mesh_displays()
-        self.mesh_chk.setChecked(False)
+        if self._show_collision_mesh():
+            self._rebuild_mesh_displays()
         t = frame_idx * self.time_step
         self._clear_playback(
             f"Frame {frame_idx} ({t:.3f} s) baked as new origin. "
@@ -590,12 +656,15 @@ class SimulationPanel:
             self._wireframe_infos = []
         self.refresh_collision_btn.setEnabled(False)
 
-    def _on_mesh_chk(self, state):
-        if state:
-            self._rebuild_mesh_displays()
-            self.refresh_mesh_btn.setEnabled(True)
-        else:
-            self._hide_mesh_displays()
+    @staticmethod
+    def _show_collision_mesh():
+        from ..simulation.BulletSimulation import _find_mesh_settings
+        settings = _find_mesh_settings()
+        if settings is None:
+            return False
+        if hasattr(settings.Proxy, "onDocumentRestored"):
+            settings.Proxy.onDocumentRestored(settings)
+        return getattr(settings, "ShowCollisionMesh", False)
 
     def _rebuild_mesh_displays(self):
         """(Re)create tessellated mesh displays from the current OriginalObject placements."""
@@ -615,13 +684,13 @@ class SimulationPanel:
         if self._mesh_infos:
             remove_collision_mesh_displays(self._mesh_infos)
             self._mesh_infos = []
-        self.refresh_mesh_btn.setEnabled(False)
 
     def reject(self):
         self._closed = True
+        self._sim_stop_requested = True
+        self._sim_paused = False
         self._stop()
         self._hide_wireframes()
-        self._hide_mesh_displays()
         FreeCADGui.Control.closeDialog()
 
 
@@ -641,6 +710,14 @@ class RunSimulationCommand:
         return FreeCAD.ActiveDocument is not None
 
     def Activated(self):
+        from ..objects.BulletContainer import find_container
+        from ..objects.BulletRunSimulation import make_run_simulation
+        container = find_container()
+        if container is not None and getattr(container, "RunSimulation", None) is None:
+            if hasattr(container.Proxy, "onDocumentRestored"):
+                container.Proxy.onDocumentRestored(container)
+            make_run_simulation(container)
+            FreeCAD.ActiveDocument.recompute()
         if FreeCADGui.Control.activeDialog():
             FreeCADGui.Control.closeDialog()
         FreeCADGui.Control.showDialog(SimulationPanel())

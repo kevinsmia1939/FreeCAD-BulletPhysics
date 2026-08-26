@@ -25,10 +25,21 @@ class MeshSettingsFeature:
         obj.addProperty("App::PropertyFloat", "GeneratedMeshSize", "Meshing State")
         obj.addProperty("App::PropertyFloat", "GeneratedAngularDeflection", "Meshing State")
         obj.addProperty("App::PropertyString", "GeneratedMesher", "Meshing State")
+        obj.addProperty("App::PropertyBool", "ShowCollisionMesh", "Display",
+                        "Show orange collision-mesh wireframes during simulation playback")
+        obj.ShowCollisionMesh = False
         obj.Proxy = self
 
     def execute(self, obj):
         pass
+
+    def onDocumentRestored(self, obj):
+        if not hasattr(obj, "ShowCollisionMesh"):
+            obj.addProperty("App::PropertyBool", "ShowCollisionMesh", "Display",
+                            "Show orange collision-mesh wireframes during simulation playback")
+            obj.ShowCollisionMesh = False
+        if FreeCAD.GuiUp:
+            obj.ViewObject.Visibility = True
 
     def __getstate__(self):
         return None
@@ -105,11 +116,12 @@ def generate_meshes(settings):
     meshes = []
     source_objects = [rigid_body.OriginalObject
                       for rigid_body in collect_rigid_bodies(doc)]
-    source_objects.extend(emitter.TemplateObject
-                          for emitter in collect_emitters(doc))
+    from ..simulation.BulletSimulation import emitter_template_entries
+    source_objects.extend(template for emitter in collect_emitters(doc)
+                          for template, _ratio in emitter_template_entries(emitter))
     unique_sources = {source.Name: source for source in source_objects}
     for source in unique_sources.values():
-        mesh_obj = doc.addObject("Mesh::Feature", f"_BtMesh_{source.Name}")
+        mesh_obj = doc.addObject("Mesh::Feature", f"_BtGlobalMesh_{source.Name}")
         mesh_obj.addProperty("App::PropertyLink", "SourceObject", "Bullet Physics")
         mesh_obj.SourceObject = source
         mesh_obj.Label = f"Mesh: {source.Label}"
@@ -159,15 +171,32 @@ class MeshSettingsPanel:
             "Generate meshes for every enabled active and passive rigid body.")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.show_collision_mesh = QtWidgets.QCheckBox("Show collision mesh")
+        self.show_collision_mesh.setToolTip(
+            "Display orange wireframes for the tessellated collision meshes. "
+            "They update during simulation playback.")
+        self.show_collision_mesh.setChecked(getattr(settings, "ShowCollisionMesh", False))
+        layout.addWidget(self.show_collision_mesh)
         self.generate_button = QtWidgets.QPushButton("Generate Meshes")
         self.generate_button.clicked.connect(self._generate)
         layout.addWidget(self.generate_button)
         layout.addStretch()
+        self.show_collision_mesh.toggled.connect(self._on_show_collision_mesh)
 
     def _save(self):
         self._settings.Mesher = self.mesher.currentText()
         self._settings.MeshSize = self.mesh_size.value()
         self._settings.AngularDeflection = self.angle.value()
+        self._settings.ShowCollisionMesh = self.show_collision_mesh.isChecked()
+
+    def _on_show_collision_mesh(self, visible):
+        """Show or remove the static collision-mesh preview immediately."""
+        self._save()
+        from ..simulation.BulletSimulation import (
+            cleanup_stale_mesh_displays, create_collision_mesh_displays)
+        cleanup_stale_mesh_displays(self._settings.Document)
+        if visible:
+            create_collision_mesh_displays(self._settings.Document)
 
     def _generate(self):
         from PySide import QtWidgets
@@ -222,12 +251,16 @@ class MeshSettingsViewProvider:
 
 
 def make_mesh_settings(container):
-    doc = FreeCAD.ActiveDocument
-    settings = doc.addObject("App::FeaturePython", "BulletMesh")
+    doc = container.Document
+    # Match FreeCAD's solver-task objects: a Part::FeaturePython has an empty
+    # Shape but remains an active, non-greyed tree item.
+    settings = doc.addObject("Part::FeaturePython", "BulletMesh")
     MeshSettingsFeature(settings)
     settings.Label = "Mesh"
     if FreeCAD.GuiUp:
         MeshSettingsViewProvider(settings.ViewObject)
+        # This is a settings object, not geometry. Keep its tree icon active.
+        settings.ViewObject.Visibility = True
     container.MeshSettings = settings
     doc.recompute()
     return settings
