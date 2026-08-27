@@ -49,6 +49,11 @@ class RigidBodyFeature:
                             "Include this body in Bullet Physics simulations")
             obj.Enabled = True
 
+    def onChanged(self, obj, prop):
+        if prop == "BodyType" and getattr(obj, "BodyLink", None) is not None:
+            from ..preferences.BulletPreferences import apply_body_color
+            apply_body_color(obj.BodyLink, obj.BodyType)
+
     def __getstate__(self):
         return None
 
@@ -128,6 +133,9 @@ def make_rigid_body(original_obj, body_type="Active", container=None, enabled=Tr
     rb.BodyType = body_type
     rb.Enabled = bool(enabled)
     rb.Label = f"RigidBody_{original_obj.Label}"
+
+    from ..preferences.BulletPreferences import apply_body_color
+    apply_body_color(link, body_type)
 
     if FreeCAD.GuiUp:
         import FreeCADGui

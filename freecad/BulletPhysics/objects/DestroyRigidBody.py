@@ -23,6 +23,8 @@ class DestroyRigidBodyFeature:
             obj.addProperty("App::PropertyBool", "Enabled", "Destroy Trigger",
                             "Include this trigger in Bullet Physics simulations")
             obj.Enabled = True
+        if FreeCAD.GuiUp:
+            obj.ViewObject.Visibility = True
 
     def __getstate__(self):
         return None
@@ -53,13 +55,15 @@ class DestroyRigidBodyViewProvider:
 def make_destroy_rigid_body(source_obj, container=None):
     """Create a destruction trigger for *source_obj* without changing the shape."""
     doc = FreeCAD.ActiveDocument
-    obj = doc.addObject("App::FeaturePython", f"DestroyBody_{source_obj.Name}")
+    # Part::FeaturePython keeps this no-shape task object active in the tree.
+    obj = doc.addObject("Part::FeaturePython", f"DestroyBody_{source_obj.Name}")
     DestroyRigidBodyFeature(obj)
     obj.SourceObject = source_obj
     obj.Label = f"Destroy Body: {source_obj.Label}"
 
     if FreeCAD.GuiUp:
         DestroyRigidBodyViewProvider(obj.ViewObject)
+        obj.ViewObject.Visibility = True
 
     if container is not None:
         if not hasattr(container, "DestroyBodies"):

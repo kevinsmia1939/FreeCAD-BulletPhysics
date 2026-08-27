@@ -15,8 +15,10 @@ from __future__ import print_function
 
 import csv
 import math
+import os
 from pathlib import Path
 import secrets
+import time
 
 import FreeCAD as App
 
@@ -25,12 +27,17 @@ SOURCE_DOCUMENT = Path(
     "/home/kevin/Dropbox/UAntwerp/PhD_thesis/FreeCAD_files/"
     "packed_bed_void.FCStd")
 OUTPUT_DIRECTORY = SOURCE_DOCUMENT.parent / "packing_density_sweep"
-BED_DIAMETERS_MM = (6,8,10,12.5,15,17.5,20,25,30,35,40,45,50)
+BED_DIAMETERS_MM = (6,8,10,11,12,13,14,15,16,18,20,22.5,25,30,35,40,45,50,55,60)
 
 VARIABLE_SET_NAME = "VarSet"
 BED_DIAMETER_PROPERTY = "bed_diameter"
 PARTICLE_LENGTH_PROPERTY = "particle_length"
 ROI_LABEL = "ROI"
+CSV_FIELDS = (
+    "bed_diameter_mm", "particle_length_mm", "changed_property",
+    "surviving_particles", "randomized_emitters",
+    "calculated_packing_volume_mm3", "normalization_volume_mm3",
+    "packing_density_percent", "simulation_compute_time_seconds")
 
 
 def _set_length(obj, property_name, value_mm):
@@ -77,8 +84,10 @@ def randomize_emitter_seeds(document):
 
 
 def simulation_progress(diameter_mm):
-    """Create a callback that prints simulation progress in five-percent steps."""
+    """Create a callback with percentage and five-minute wall-time reports."""
     last_percent = [-1]
+    started_at = time.monotonic()
+    last_wall_report_at = [started_at]
 
     def report(step, total_steps, _frames, _speed_frames, time_step):
         percent = int(step * 100 / total_steps) if total_steps else 100
@@ -86,6 +95,17 @@ def simulation_progress(diameter_mm):
             print("{:.6g} mm: simulation {:d}/{:d} ({:d}%), t={:.3f} s"
                   .format(diameter_mm, step, total_steps, percent, step * time_step))
             last_percent[0] = percent
+        now = time.monotonic()
+        if now - last_wall_report_at[0] >= 300.0:
+            print("{:.6g} mm: wall-time checkpoint at {:.1f} min: frame "
+                  "{:d}/{:d}, simulation t={:.3f} s"
+                  .format(diameter_mm, (now - started_at) / 60.0,
+                          step, total_steps, step * time_step))
+            last_wall_report_at[0] = now
+        if App.GuiUp and step % 20 == 0 and _frames:
+            # Show a periodic still frame without starting playback.
+            from freecad.BulletPhysics.simulation.BulletSimulation import apply_frame
+            apply_frame(_frames[-1])
         return True
 
     return report
@@ -163,6 +183,22 @@ def packing_density(document, final_frame):
     return len(shapes), packed_volume, normalization_volume, density_percent
 
 
+def initialize_report(csv_path):
+    """Start a fresh report and ensure its header reaches disk immediately."""
+    with csv_path.open("w", newline="") as csv_file:
+        csv.DictWriter(csv_file, fieldnames=CSV_FIELDS).writeheader()
+        csv_file.flush()
+        os.fsync(csv_file.fileno())
+
+
+def append_report_row(csv_path, row):
+    """Durably append one completed simulation result to the report."""
+    with csv_path.open("a", newline="") as csv_file:
+        csv.DictWriter(csv_file, fieldnames=CSV_FIELDS).writerow(row)
+        csv_file.flush()
+        os.fsync(csv_file.fileno())
+
+
 def run_sweep():
     from freecad.BulletPhysics.simulation.BulletSimulation import (
         apply_frame, get_last_compute_time_seconds, run_simulation)
@@ -171,6 +207,7 @@ def run_sweep():
         raise RuntimeError("Source document does not exist: {}".format(SOURCE_DOCUMENT))
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
     csv_path = OUTPUT_DIRECTORY / "packing_density.csv"
+    initialize_report(csv_path)
     rows = []
 
     for diameter_mm in BED_DIAMETERS_MM:
@@ -220,23 +257,22 @@ def run_sweep():
                 "simulation_compute_time_seconds": compute_time_seconds,
             }
             rows.append(row)
+            append_report_row(csv_path, row)
             print("{bed_diameter_mm:g} mm complete: packing volume="
                   "{calculated_packing_volume_mm3:.8f} mm^3, normalization volume="
                   "{normalization_volume_mm3:.8f} mm^3, density="
                   "{packing_density_percent:.8f}% "
                   "(computed in {simulation_compute_time_seconds:.3f} s; "
                   "{surviving_particles} surviving particles)".format(**row))
+            print("  Result saved to {}".format(csv_path))
+        except KeyboardInterrupt:
+            print("\nSweep interrupted. Bullet simulation stopped; "
+                  "{:d} completed result(s) remain in {}."
+                  .format(len(rows), csv_path))
+            return rows
         finally:
             App.closeDocument(document.Name)
 
-    with csv_path.open("w", newline="") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=(
-            "bed_diameter_mm", "particle_length_mm", "changed_property",
-            "surviving_particles", "randomized_emitters",
-            "calculated_packing_volume_mm3", "normalization_volume_mm3",
-            "packing_density_percent", "simulation_compute_time_seconds"))
-        writer.writeheader()
-        writer.writerows(rows)
     print("Packing-density sweep written to {}".format(csv_path))
     return rows
 

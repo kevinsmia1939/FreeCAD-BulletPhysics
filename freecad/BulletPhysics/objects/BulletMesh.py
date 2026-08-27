@@ -9,10 +9,10 @@ import FreeCAD
 
 def source_shape_signature(shape):
     """Return a stable, lightweight signature for generated-mesh validation."""
-    bb = shape.BoundBox
+    # Analytic curves can produce a slightly different BoundBox after a mesh
+    # is generated. Avoid false stale-mesh errors by using stable invariants.
     return "|".join("{:.9g}".format(value) for value in (
         shape.Volume, shape.Area,
-        bb.XMin, bb.YMin, bb.ZMin, bb.XMax, bb.YMax, bb.ZMax,
         len(shape.Vertexes), len(shape.Edges), len(shape.Faces), len(shape.Solids),
     ))
 
@@ -110,8 +110,9 @@ def _generate_mesh(shape, mesher, mesh_size, angular_deflection):
 
 
 def generate_meshes(settings):
-    """Generate meshes for every enabled rigid body with shared settings."""
-    from ..simulation.BulletSimulation import collect_emitters, collect_rigid_bodies
+    """Generate meshes for simulation bodies, emitters, and observers."""
+    from ..simulation.BulletSimulation import (
+        collect_emitters, collect_observers, collect_rigid_bodies)
 
     doc = settings.Document
     mesh_size = max(0.001, settings.MeshSize)
@@ -129,6 +130,7 @@ def generate_meshes(settings):
     from ..simulation.BulletSimulation import emitter_template_entries
     source_objects.extend(template for emitter in collect_emitters(doc)
                           for template, _ratio in emitter_template_entries(emitter))
+    source_objects.extend(observer.SourceObject for observer in collect_observers(doc))
     unique_sources = {source.Name: source for source in source_objects}
     for source in unique_sources.values():
         mesh_obj = doc.addObject("Mesh::Feature", f"_BtGlobalMesh_{source.Name}")

@@ -25,11 +25,21 @@ class BulletEmitterFeature:
         obj.addProperty("App::PropertyLink", "StopConditionObject", "Conditions",
                         "Optional shape that stops future emissions when touched by an active body")
         obj.addProperty("App::PropertyEnumeration", "StartConditionType", "Conditions",
-                        "Start emission by time or when an active body touches a shape")
-        obj.StartConditionType = ["Time", "Collision Object"]
+                        "Start emission by time, collision object, or observer")
+        obj.StartConditionType = ["Time", "Collision Object", "Observer"]
         obj.addProperty("App::PropertyEnumeration", "EndConditionType", "Conditions",
-                        "End emission by time or when an active body touches a shape")
-        obj.EndConditionType = ["Time", "Collision Object"]
+                        "Optional trigger that stops emission before the stop time")
+        obj.EndConditionType = ["None", "Collision Object", "Observer"]
+        obj.addProperty("App::PropertyLink", "StartConditionObserver", "Conditions",
+                        "Observer that starts emission when it contains a matching body")
+        obj.addProperty("App::PropertyLink", "StopConditionObserver", "Conditions",
+                        "Observer that stops emission when it contains a matching body")
+        obj.addProperty("App::PropertyEnumeration", "StartConditionBodyType", "Conditions",
+                        "Rigid-body type required by the start condition")
+        obj.StartConditionBodyType = ["Active", "Passive", "Any"]
+        obj.addProperty("App::PropertyEnumeration", "StopConditionBodyType", "Conditions",
+                        "Rigid-body type required by the stop condition")
+        obj.StopConditionBodyType = ["Active", "Passive", "Any"]
         obj.addProperty("App::PropertyBool", "Enabled", "Emitter",
                         "Include this emitter in Bullet Physics simulations")
         obj.Enabled = True
@@ -63,6 +73,9 @@ class BulletEmitterFeature:
         obj.addProperty("App::PropertyFloat", "Velocity", "Active Body",
                         "Initial launch speed in m/s. Ignored for Passive bodies")
         obj.Velocity = 0.0
+        obj.addProperty("App::PropertyFloat", "BecomePassiveAfter", "Active Body",
+                        "Seconds after emission before an active particle becomes passive; 0 disables conversion")
+        obj.BecomePassiveAfter = 0.0
         obj.addProperty("App::PropertyVector", "Direction", "Active Body",
                         "Initial launch direction. Ignored for Passive bodies")
         obj.Direction = FreeCAD.Vector(0, 0, 1)
@@ -121,15 +134,41 @@ class BulletEmitterFeature:
         if not hasattr(obj, "StartConditionType"):
             obj.addProperty("App::PropertyEnumeration", "StartConditionType", "Conditions",
                             "Start emission by time or when an active body touches a shape")
-            obj.StartConditionType = ["Time", "Collision Object"]
+            obj.StartConditionType = ["Time", "Collision Object", "Observer"]
             if getattr(obj, "StartConditionObject", None) is not None:
                 obj.StartConditionType = "Collision Object"
         if not hasattr(obj, "EndConditionType"):
             obj.addProperty("App::PropertyEnumeration", "EndConditionType", "Conditions",
                             "End emission by time or when an active body touches a shape")
-            obj.EndConditionType = ["Time", "Collision Object"]
+            obj.EndConditionType = ["None", "Collision Object", "Observer"]
             if getattr(obj, "StopConditionObject", None) is not None:
                 obj.EndConditionType = "Collision Object"
+        if not hasattr(obj, "StartConditionObserver"):
+            obj.addProperty("App::PropertyLink", "StartConditionObserver", "Conditions",
+                            "Observer that starts emission when it contains a matching body")
+        if not hasattr(obj, "StopConditionObserver"):
+            obj.addProperty("App::PropertyLink", "StopConditionObserver", "Conditions",
+                            "Observer that stops emission when it contains a matching body")
+        if not hasattr(obj, "StartConditionBodyType"):
+            obj.addProperty("App::PropertyEnumeration", "StartConditionBodyType", "Conditions",
+                            "Rigid-body type required by the start condition")
+            obj.StartConditionBodyType = ["Active", "Passive", "Any"]
+        if not hasattr(obj, "StopConditionBodyType"):
+            obj.addProperty("App::PropertyEnumeration", "StopConditionBodyType", "Conditions",
+                            "Rigid-body type required by the stop condition")
+            obj.StopConditionBodyType = ["Active", "Passive", "Any"]
+        # Existing documents retain their old enum item lists until explicitly
+        # expanded. The former End "Time" mode is now the "None" trigger.
+        start_selected = getattr(obj, "StartConditionType", "Time")
+        obj.StartConditionType = ["Time", "Collision Object", "Observer"]
+        if start_selected in ("Time", "Collision Object", "Observer"):
+            obj.StartConditionType = start_selected
+        end_selected = getattr(obj, "EndConditionType", "None")
+        obj.EndConditionType = ["None", "Collision Object", "Observer"]
+        if end_selected == "Time":
+            end_selected = "None"
+        if end_selected in ("None", "Collision Object", "Observer"):
+            obj.EndConditionType = end_selected
         if not hasattr(obj, "RandomSeed"):
             obj.addProperty("App::PropertyInteger", "RandomSeed", "Emission",
                             "Random seed. 0 creates a new random sequence each simulation")
@@ -138,10 +177,20 @@ class BulletEmitterFeature:
             obj.addProperty("App::PropertyVector", "DirectionRandomness", "Active Body",
                             "Per-axis direction randomness: 0 = none, 1 = maximum")
             obj.DirectionRandomness = FreeCAD.Vector(0, 0, 0)
+        if not hasattr(obj, "BecomePassiveAfter"):
+            obj.addProperty("App::PropertyFloat", "BecomePassiveAfter", "Active Body",
+                            "Seconds after emission before an active particle becomes passive; 0 disables conversion")
+            obj.BecomePassiveAfter = 0.0
         if not hasattr(obj, "DirectionRandomSeed"):
             obj.addProperty("App::PropertyInteger", "DirectionRandomSeed", "Active Body",
                             "Direction random seed. 0 creates a new random sequence each simulation")
             obj.DirectionRandomSeed = 0
+
+    def onChanged(self, obj, prop):
+        if prop == "BodyType":
+            from ..preferences.BulletPreferences import apply_body_color
+            for link in getattr(obj, "GeneratedLinks", []):
+                apply_body_color(link, obj.BodyType)
 
     def __getstate__(self):
         return None
@@ -191,34 +240,60 @@ class EmitterPanel:
         layout.addWidget(source_group)
 
         condition_group = QtWidgets.QGroupBox("Start / End Conditions")
-        condition_form = QtWidgets.QFormLayout(condition_group)
+        condition_layout = QtWidgets.QVBoxLayout(condition_group)
         self.start_condition_type_combo = QtWidgets.QComboBox()
-        self.start_condition_type_combo.addItems(["Time", "Collision Object"])
+        self.start_condition_type_combo.addItems(["Time", "Collision Object", "Observer"])
         self.start_condition_type_combo.setCurrentText(
             getattr(emitter, "StartConditionType", "Time"))
         self.end_condition_type_combo = QtWidgets.QComboBox()
-        self.end_condition_type_combo.addItems(["Time", "Collision Object"])
+        self.end_condition_type_combo.addItems(["None", "Collision Object", "Observer"])
         self.end_condition_type_combo.setCurrentText(
-            getattr(emitter, "EndConditionType", "Time"))
+            getattr(emitter, "EndConditionType", "None"))
         self.start_spin = self._time_spin(getattr(emitter, "StartTime", 0.0))
         self.end_spin = self._time_spin(getattr(emitter, "EndTime", 1.0))
         self.start_condition_object_combo = QtWidgets.QComboBox()
         self.end_condition_object_combo = QtWidgets.QComboBox()
+        self.start_condition_observer_combo = QtWidgets.QComboBox()
+        self.end_condition_observer_combo = QtWidgets.QComboBox()
+        self.start_condition_body_type_combo = QtWidgets.QComboBox()
+        self.end_condition_body_type_combo = QtWidgets.QComboBox()
+        self.start_condition_body_type_combo.addItems(["Active", "Passive", "Any"])
+        self.end_condition_body_type_combo.addItems(["Active", "Passive", "Any"])
+        self.start_condition_body_type_combo.setCurrentText(
+            getattr(emitter, "StartConditionBodyType", "Active"))
+        self.end_condition_body_type_combo.setCurrentText(
+            getattr(emitter, "StopConditionBodyType", "Active"))
         self._populate_condition_object_combos()
+        self._populate_condition_observer_combos()
         self.start_condition_value = QtWidgets.QStackedWidget()
         self.start_condition_value.addWidget(self.start_spin)
         self.start_condition_value.addWidget(self.start_condition_object_combo)
+        self.start_condition_value.addWidget(self.start_condition_observer_combo)
         self.end_condition_value = QtWidgets.QStackedWidget()
         self.end_condition_value.addWidget(QtWidgets.QWidget())
         self.end_condition_value.addWidget(self.end_condition_object_combo)
-        condition_form.addRow("Start condition:", self.start_condition_type_combo)
-        condition_form.addRow("Start value:", self.start_condition_value)
-        condition_form.addRow("End condition:", self.end_condition_type_combo)
-        condition_form.addRow("End time (s):", self.end_spin)
-        condition_form.addRow("End collision object:", self.end_condition_value)
-        condition_form.addRow(QtWidgets.QLabel(
-            "The emitter stops when its end time is reached or its end collision object is touched. "
-            "Set end time to 0 for collision-only stopping."))
+        self.end_condition_value.addWidget(self.end_condition_observer_combo)
+        start_group = QtWidgets.QGroupBox("Start Emission")
+        start_form = QtWidgets.QFormLayout(start_group)
+        start_form.addRow("Source:", self.start_condition_type_combo)
+        start_form.addRow("Trigger time / object:", self.start_condition_value)
+        self.start_condition_body_type_label = QtWidgets.QLabel("Matching body type:")
+        start_form.addRow(self.start_condition_body_type_label, self.start_condition_body_type_combo)
+        condition_layout.addWidget(start_group)
+
+        end_group = QtWidgets.QGroupBox("Stop Emission")
+        end_form = QtWidgets.QFormLayout(end_group)
+        end_form.addRow("Trigger:", self.end_condition_type_combo)
+        end_form.addRow("Stop time:", self.end_spin)
+        end_form.addRow("Trigger object / observer:", self.end_condition_value)
+        self.end_condition_body_type_label = QtWidgets.QLabel("Matching body type:")
+        end_form.addRow(self.end_condition_body_type_label, self.end_condition_body_type_combo)
+        end_hint = QtWidgets.QLabel(
+            "Stops when the stop time is reached or the trigger is satisfied. "
+            "Set stop time to 0 and Trigger to None to emit until simulation ends.")
+        end_hint.setWordWrap(True)
+        end_form.addRow(end_hint)
+        condition_layout.addWidget(end_group)
         layout.addWidget(condition_group)
 
         emission_group = QtWidgets.QGroupBox("Emission")
@@ -263,6 +338,15 @@ class EmitterPanel:
         self.velocity_spin.setDecimals(4)
         self.velocity_spin.setSuffix(" m/s")
         self.velocity_spin.setValue(max(0.0, getattr(emitter, "Velocity", 0.0)))
+        self.become_passive_spin = QtWidgets.QDoubleSpinBox()
+        self.become_passive_spin.setRange(0.0, 100000.0)
+        self.become_passive_spin.setDecimals(4)
+        self.become_passive_spin.setSuffix(" s")
+        self.become_passive_spin.setToolTip(
+            "Active particles become static passive bodies after this emission age. "
+            "Set 0 to keep them active.")
+        self.become_passive_spin.setValue(
+            max(0.0, getattr(emitter, "BecomePassiveAfter", 0.0)))
         direction_widget, self.direction_spins = self._vector_input(
             emitter.Direction, -100000.0, 100000.0, 4, "Direction vector")
         direction_random_widget, self.direction_random_spins = self._vector_input(
@@ -275,6 +359,7 @@ class EmitterPanel:
         self.passive_note = QtWidgets.QLabel("Passive object selected: velocity and direction are ignored.")
         self.passive_note.setWordWrap(True)
         launch_form.addRow("Velocity:", self.velocity_spin)
+        launch_form.addRow("Become passive after:", self.become_passive_spin)
         launch_form.addRow("Direction:", direction_widget)
         launch_form.addRow("Direction randomness:", direction_random_widget)
         launch_form.addRow("Direction random seed:", self.direction_random_seed_spin)
@@ -290,6 +375,10 @@ class EmitterPanel:
             self._on_condition_type_changed)
         self.start_condition_object_combo.currentIndexChanged.connect(self._save)
         self.end_condition_object_combo.currentIndexChanged.connect(self._save)
+        self.start_condition_observer_combo.currentIndexChanged.connect(self._save)
+        self.end_condition_observer_combo.currentIndexChanged.connect(self._save)
+        self.start_condition_body_type_combo.currentIndexChanged.connect(self._save)
+        self.end_condition_body_type_combo.currentIndexChanged.connect(self._save)
         self.enabled_check.toggled.connect(self._save)
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
         self.count_spin.valueChanged.connect(self._save)
@@ -303,6 +392,7 @@ class EmitterPanel:
         self.random_seed_spin.valueChanged.connect(self._save)
         self.direction_random_seed_spin.valueChanged.connect(self._save)
         self.velocity_spin.valueChanged.connect(self._save)
+        self.become_passive_spin.valueChanged.connect(self._save)
         self._update_body_type()
         self._update_condition_controls()
         self._update_rate_mode()
@@ -450,6 +540,25 @@ class EmitterPanel:
             combo.setCurrentIndex(selected)
             combo.blockSignals(False)
 
+    def _populate_condition_observer_combos(self):
+        for combo, current in (
+                (self.start_condition_observer_combo,
+                 getattr(self._emitter, "StartConditionObserver", None)),
+                (self.end_condition_observer_combo,
+                 getattr(self._emitter, "StopConditionObserver", None))):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("(none)", None)
+            selected = 0
+            for obj in self._emitter.Document.Objects:
+                if (hasattr(obj, "Proxy")
+                        and type(obj.Proxy).__name__ == "BulletObserverFeature"):
+                    combo.addItem(obj.Label, obj)
+                    if obj == current:
+                        selected = combo.count() - 1
+            combo.setCurrentIndex(selected)
+            combo.blockSignals(False)
+
     def _save(self, *_args):
         emitter = self._emitter
         emitter.EmissionSource = self.source_combo.currentData()
@@ -461,6 +570,10 @@ class EmitterPanel:
         emitter.EndConditionType = self.end_condition_type_combo.currentText()
         emitter.StartConditionObject = self.start_condition_object_combo.currentData()
         emitter.StopConditionObject = self.end_condition_object_combo.currentData()
+        emitter.StartConditionObserver = self.start_condition_observer_combo.currentData()
+        emitter.StopConditionObserver = self.end_condition_observer_combo.currentData()
+        emitter.StartConditionBodyType = self.start_condition_body_type_combo.currentText()
+        emitter.StopConditionBodyType = self.end_condition_body_type_combo.currentText()
         emitter.Enabled = self.enabled_check.isChecked()
         emitter.BodyType = self.type_combo.currentText()
         emitter.Count = self.count_spin.value()
@@ -473,6 +586,7 @@ class EmitterPanel:
             self.orientation_random_spins)
         emitter.RandomSeed = self.random_seed_spin.value()
         emitter.Velocity = self.velocity_spin.value()
+        emitter.BecomePassiveAfter = self.become_passive_spin.value()
         emitter.Direction = self._vector_from_spins(self.direction_spins)
         emitter.DirectionRandomness = self._vector_from_spins(
             self.direction_random_spins)
@@ -493,20 +607,30 @@ class EmitterPanel:
         self._save()
 
     def _update_condition_controls(self):
+        start_type = self.start_condition_type_combo.currentText()
+        end_type = self.end_condition_type_combo.currentText()
         self.start_condition_value.setCurrentIndex(
-            1 if self.start_condition_type_combo.currentText() == "Collision Object" else 0)
+            {"Time": 0, "Collision Object": 1, "Observer": 2}[start_type])
         self.end_condition_value.setCurrentIndex(
-            1 if self.end_condition_type_combo.currentText() == "Collision Object" else 0)
+            {"None": 0, "Collision Object": 1, "Observer": 2}[end_type])
+        self.start_condition_body_type_combo.setEnabled(start_type != "Time")
+        self.end_condition_body_type_combo.setEnabled(end_type != "Time")
+        start_show_body_type = start_type == "Collision Object"
+        end_show_body_type = end_type == "Collision Object"
+        self.start_condition_body_type_label.setVisible(start_show_body_type)
+        self.start_condition_body_type_combo.setVisible(start_show_body_type)
+        self.end_condition_body_type_label.setVisible(end_show_body_type)
+        self.end_condition_body_type_combo.setVisible(end_show_body_type)
 
     def _update_rate_mode(self):
         rate_mode = self.rate_check.isChecked()
         self.count_spin.setEnabled(not rate_mode)
-        self.end_spin.setEnabled(not rate_mode)
         self.rate_spin.setEnabled(rate_mode)
 
     def _update_body_type(self):
         passive = self.type_combo.currentText() == "Passive"
         self.velocity_spin.setEnabled(not passive)
+        self.become_passive_spin.setEnabled(not passive)
         for spin in self.direction_spins + self.direction_random_spins:
             spin.setEnabled(not passive)
         self.direction_random_seed_spin.setEnabled(not passive)

@@ -78,13 +78,17 @@ class SimulationPanel:
         sim_layout.addWidget(self.sim_status)
 
         stop_group = QtWidgets.QGroupBox("Conditional Stop")
-        stop_form = QtWidgets.QFormLayout(stop_group)
+        stop_layout = QtWidgets.QVBoxLayout(stop_group)
         self.stop_on_contact_check = QtWidgets.QCheckBox(
-            "Stop when an active body touches this object")
+            "Enable conditional stop")
         self.stop_on_contact_check.setToolTip(
-            "The selected modelled shape is used as a non-physical contact trigger.")
+            "Stop when a matching rigid body touches a shape or is inside an observer.")
+        self.stop_type_combo = QtWidgets.QComboBox()
+        self.stop_type_combo.addItems(["Collision Object", "Observer"])
         self.stop_target_combo = QtWidgets.QComboBox()
         self._populate_stop_targets()
+        self.stop_body_type_combo = QtWidgets.QComboBox()
+        self.stop_body_type_combo.addItems(["Active", "Passive", "Any"])
         self.stop_delay_spin = QtWidgets.QDoubleSpinBox()
         self.stop_delay_spin.setRange(0.0, 3600.0)
         self.stop_delay_spin.setDecimals(3)
@@ -93,9 +97,18 @@ class SimulationPanel:
         self.stop_delay_spin.setToolTip(
             "Continue simulating for this duration after the first target contact. "
             "0 stops immediately.")
-        stop_form.addRow(self.stop_on_contact_check)
-        stop_form.addRow("Target object:", self.stop_target_combo)
-        stop_form.addRow("Delay after contact:", self.stop_delay_spin)
+        stop_layout.addWidget(self.stop_on_contact_check)
+        trigger_group = QtWidgets.QGroupBox("Trigger")
+        trigger_form = QtWidgets.QFormLayout(trigger_group)
+        trigger_form.addRow("Source:", self.stop_type_combo)
+        trigger_form.addRow("Target:", self.stop_target_combo)
+        self.stop_body_type_label = QtWidgets.QLabel("Matching body type:")
+        trigger_form.addRow(self.stop_body_type_label, self.stop_body_type_combo)
+        stop_layout.addWidget(trigger_group)
+        response_group = QtWidgets.QGroupBox("Response")
+        response_form = QtWidgets.QFormLayout(response_group)
+        response_form.addRow("Delay after trigger:", self.stop_delay_spin)
+        stop_layout.addWidget(response_group)
         sim_layout.addWidget(stop_group)
 
         collision_row = QtWidgets.QHBoxLayout()
@@ -237,6 +250,9 @@ class SimulationPanel:
         self.stop_on_contact_check.toggled.connect(self._update_stop_target_state)
         self.stop_on_contact_check.toggled.connect(self._save_stop_condition)
         self.stop_target_combo.currentIndexChanged.connect(self._save_stop_condition)
+        self.stop_type_combo.currentIndexChanged.connect(self._save_stop_condition)
+        self.stop_type_combo.currentIndexChanged.connect(self._update_stop_target_state)
+        self.stop_body_type_combo.currentIndexChanged.connect(self._save_stop_condition)
         self.stop_delay_spin.valueChanged.connect(self._save_stop_condition)
         self.speed_combo.currentIndexChanged.connect(self._save_panel_settings)
         self.loop_chk.toggled.connect(self._save_panel_settings)
@@ -260,10 +276,18 @@ class SimulationPanel:
         for obj in FreeCAD.ActiveDocument.Objects:
             if hasattr(obj, "Shape") and obj.Shape is not None:
                 self.stop_target_combo.addItem(obj.Label, obj)
+            elif (hasattr(obj, "Proxy")
+                  and type(obj.Proxy).__name__ == "BulletObserverFeature"):
+                self.stop_target_combo.addItem(obj.Label, obj)
 
     def _update_stop_target_state(self):
         enabled = self.stop_on_contact_check.isChecked()
+        self.stop_type_combo.setEnabled(enabled)
         self.stop_target_combo.setEnabled(enabled)
+        self.stop_body_type_combo.setEnabled(enabled)
+        show_body_type = self.stop_type_combo.currentText() == "Collision Object"
+        self.stop_body_type_label.setVisible(show_body_type)
+        self.stop_body_type_combo.setVisible(show_body_type)
         self.stop_delay_spin.setEnabled(enabled)
 
     def _stop_target(self):
@@ -294,6 +318,10 @@ class SimulationPanel:
             getattr(world, "ConditionalStopEnabled", False))
         self.stop_delay_spin.setValue(max(
             0.0, getattr(world, "ConditionalStopDelay", 0.0)))
+        self.stop_type_combo.setCurrentText(
+            getattr(world, "ConditionalStopType", "Collision Object"))
+        self.stop_body_type_combo.setCurrentText(
+            getattr(world, "ConditionalStopBodyType", "Active"))
         for index in range(self.stop_target_combo.count()):
             if self.stop_target_combo.itemData(index) == target:
                 self.stop_target_combo.setCurrentIndex(index)
@@ -308,6 +336,8 @@ class SimulationPanel:
             return
         world.ConditionalStopEnabled = self.stop_on_contact_check.isChecked()
         world.ConditionalStopTarget = self._stop_target()
+        world.ConditionalStopType = self.stop_type_combo.currentText()
+        world.ConditionalStopBodyType = self.stop_body_type_combo.currentText()
         world.ConditionalStopDelay = self.stop_delay_spin.value()
         world.Document.recompute()
 
@@ -400,7 +430,8 @@ class SimulationPanel:
         result = run_simulation(
             callback=cb,
             stop_on_contact=self._stop_target(),
-            stop_delay=self._stop_delay())
+            stop_delay=self._stop_delay(),
+            stop_body_type=self.stop_body_type_combo.currentText())
         self.sim_btn.setEnabled(True)
         self.stop_sim_btn.setEnabled(False)
         self.pause_sim_btn.setEnabled(False)

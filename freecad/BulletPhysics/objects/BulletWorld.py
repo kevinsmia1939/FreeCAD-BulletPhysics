@@ -56,6 +56,12 @@ class BulletWorldFeature:
         obj.ConditionalStopEnabled = False
         obj.addProperty("App::PropertyLink", "ConditionalStopTarget", "Conditions",
                         "Non-physical target shape used for the conditional stop")
+        obj.addProperty("App::PropertyEnumeration", "ConditionalStopType", "Conditions",
+                        "Stop when an active/passive body contacts a shape or enters an observer")
+        obj.ConditionalStopType = ["Collision Object", "Observer"]
+        obj.addProperty("App::PropertyEnumeration", "ConditionalStopBodyType", "Conditions",
+                        "Rigid-body type required to satisfy the conditional stop")
+        obj.ConditionalStopBodyType = ["Active", "Passive", "Any"]
         obj.addProperty("App::PropertyFloat", "ConditionalStopDelay", "Conditions",
                         "Time in seconds to continue after the first target contact")
         obj.ConditionalStopDelay = 0.0
@@ -142,6 +148,14 @@ class BulletWorldFeature:
         if not hasattr(obj, "ConditionalStopTarget"):
             obj.addProperty("App::PropertyLink", "ConditionalStopTarget", "Conditions",
                             "Non-physical target shape used for the conditional stop")
+        if not hasattr(obj, "ConditionalStopType"):
+            obj.addProperty("App::PropertyEnumeration", "ConditionalStopType", "Conditions",
+                            "Stop when an active/passive body contacts a shape or enters an observer")
+            obj.ConditionalStopType = ["Collision Object", "Observer"]
+        if not hasattr(obj, "ConditionalStopBodyType"):
+            obj.addProperty("App::PropertyEnumeration", "ConditionalStopBodyType", "Conditions",
+                            "Rigid-body type required to satisfy the conditional stop")
+            obj.ConditionalStopBodyType = ["Active", "Passive", "Any"]
         if not hasattr(obj, "ConditionalStopDelay"):
             obj.addProperty("App::PropertyFloat", "ConditionalStopDelay", "Conditions",
                             "Time in seconds to continue after the first target contact")

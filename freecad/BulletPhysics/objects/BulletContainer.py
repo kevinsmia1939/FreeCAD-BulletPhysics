@@ -15,6 +15,8 @@ class BulletContainerFeature:
                         "Rigid body emitter objects managed by this simulation")
         obj.addProperty("App::PropertyLinkList", "DestroyBodies", "Container",
                         "Destroy-rigid-body trigger objects")
+        obj.addProperty("App::PropertyLinkList", "Observers", "Container",
+                        "Non-physical rigid-body observer objects")
         obj.addProperty("App::PropertyLink", "MeshSettings", "Container",
                         "Global mesh settings shared by every rigid body")
         obj.addProperty("App::PropertyLink", "RunSimulation", "Container",
@@ -31,6 +33,9 @@ class BulletContainerFeature:
         if not hasattr(obj, "DestroyBodies"):
             obj.addProperty("App::PropertyLinkList", "DestroyBodies", "Container",
                             "Destroy-rigid-body trigger objects")
+        if not hasattr(obj, "Observers"):
+            obj.addProperty("App::PropertyLinkList", "Observers", "Container",
+                            "Non-physical rigid-body observer objects")
         if not hasattr(obj, "MeshSettings"):
             obj.addProperty("App::PropertyLink", "MeshSettings", "Container",
                             "Global mesh settings shared by every rigid body")
@@ -84,6 +89,8 @@ class BulletContainerViewProvider:
             children.extend(emitter for emitter in obj.Emitters if emitter is not None)
         if hasattr(obj, "DestroyBodies"):
             children.extend(trigger for trigger in obj.DestroyBodies if trigger is not None)
+        if hasattr(obj, "Observers"):
+            children.extend(observer for observer in obj.Observers if observer is not None)
         return children
 
     def onChanged(self, vobj, prop):
@@ -116,6 +123,13 @@ class BulletContainerViewProvider:
                     if trigger is not None:
                         try:
                             trigger.ViewObject.Visibility = visible
+                        except Exception:
+                            pass
+            if hasattr(obj, "Observers"):
+                for observer in obj.Observers:
+                    if observer is not None:
+                        try:
+                            observer.ViewObject.Visibility = visible
                         except Exception:
                             pass
 

@@ -5,7 +5,7 @@ import FreeCAD
 from PySide.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog, QSizePolicy,
-    QCheckBox,
+    QCheckBox, QColorDialog,
 )
 from PySide.QtCore import Qt
 from PySide.QtGui import QColor, QPalette
@@ -23,6 +23,51 @@ def get_pybullet_path():
 def get_event_reporting_enabled():
     """Return whether emitter and destroy-trigger events go to Report View."""
     return _prefs().GetBool("ReportEvents", False)
+
+
+def _body_color(preference_name, default):
+    color = QColor(_prefs().GetString(preference_name, default))
+    if not color.isValid():
+        color = QColor(default)
+    return color
+
+
+def get_body_color(body_type):
+    """Return the configured RGB color tuple for an active or passive body."""
+    color = _body_color(
+        "PassiveBodyColor" if body_type == "Passive" else "ActiveBodyColor",
+        "#4f81bd" if body_type == "Passive" else "#d65f2b")
+    return (color.redF(), color.greenF(), color.blueF())
+
+
+def apply_body_color(obj, body_type, refresh=False):
+    """Apply the configured active/passive color to a visible document object."""
+    if not FreeCAD.GuiUp or obj is None:
+        return
+    try:
+        view_object = obj.ViewObject
+        color = get_body_color(body_type)
+        # App::Link inherits its source appearance unless this is enabled.
+        if hasattr(view_object, "OverrideMaterial"):
+            view_object.OverrideMaterial = True
+        if "ShapeColor" in view_object.PropertiesList:
+            view_object.ShapeColor = color
+
+        # In current FreeCAD versions, an overridden link displays its own
+        # ShapeAppearance material rather than ShapeColor.
+        if hasattr(view_object, "ShapeAppearance"):
+            appearance = list(view_object.ShapeAppearance)
+            for material in appearance:
+                material.DiffuseColor = color
+            view_object.ShapeAppearance = tuple(appearance)
+        elif hasattr(view_object, "ShapeMaterial"):
+            view_object.ShapeMaterial.DiffuseColor = color
+
+        if refresh:
+            import FreeCADGui
+            FreeCADGui.activeDocument().activeView().redraw()
+    except Exception:
+        pass
 
 
 def _autodetect_pybullet():
@@ -72,6 +117,8 @@ def _try_import_pybullet(extra_path=""):
 class BulletPreferencesPage:
     def __init__(self, parent=None):
         self.form = QWidget(parent)
+        self._active_color = _body_color("ActiveBodyColor", "#d65f2b")
+        self._passive_color = _body_color("PassiveBodyColor", "#4f81bd")
         self._build_ui()
 
     def _build_ui(self):
@@ -132,7 +179,35 @@ class BulletPreferencesPage:
             "by a destroy rigid body trigger.")
         reporting_layout.addWidget(self._report_events_check)
         root.addWidget(reporting_group)
+
+        colors_group = QGroupBox("Body Colors")
+        colors_layout = QVBoxLayout(colors_group)
+        self._active_color_button = QPushButton("Active body color")
+        self._active_color_button.clicked.connect(
+            lambda: self._choose_color("_active_color", self._active_color_button))
+        colors_layout.addWidget(self._active_color_button)
+        self._passive_color_button = QPushButton("Passive body color")
+        self._passive_color_button.clicked.connect(
+            lambda: self._choose_color("_passive_color", self._passive_color_button))
+        colors_layout.addWidget(self._passive_color_button)
+        root.addWidget(colors_group)
         root.addStretch(1)
+
+    @staticmethod
+    def _color_button_text(color):
+        return color.name().upper()
+
+    def _update_color_button(self, button, color):
+        button.setText(self._color_button_text(color))
+        button.setStyleSheet(
+            "background-color: {}; color: {};".format(
+                color.name(), "black" if color.lightness() > 128 else "white"))
+
+    def _choose_color(self, attribute, button):
+        selected = QColorDialog.getColor(getattr(self, attribute), self.form)
+        if selected.isValid():
+            setattr(self, attribute, selected)
+            self._update_color_button(button, selected)
 
     def _browse(self):
         current = self._path_edit.text().strip()
@@ -161,9 +236,15 @@ class BulletPreferencesPage:
     def saveSettings(self):
         _prefs().SetString("PybulletPath", self._path_edit.text().strip())
         _prefs().SetBool("ReportEvents", self._report_events_check.isChecked())
+        _prefs().SetString("ActiveBodyColor", self._active_color.name())
+        _prefs().SetString("PassiveBodyColor", self._passive_color.name())
 
     def loadSettings(self):
         self._report_events_check.setChecked(get_event_reporting_enabled())
+        self._active_color = _body_color("ActiveBodyColor", "#d65f2b")
+        self._passive_color = _body_color("PassiveBodyColor", "#4f81bd")
+        self._update_color_button(self._active_color_button, self._active_color)
+        self._update_color_button(self._passive_color_button, self._passive_color)
         stored = get_pybullet_path()
         if stored:
             self._path_edit.setText(stored)

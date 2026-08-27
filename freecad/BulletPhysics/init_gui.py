@@ -19,6 +19,7 @@ class BulletPhysicsWorkbench(FreeCADGui.Workbench):
         from .commands import CmdAddLauncher
         from .commands import CmdAddEmitter
         from .commands import CmdAddDestroyRigidBody
+        from .commands import CmdAddObserver
         from .commands import CmdAddMesh
         from .commands import CmdDowngrade
         from .commands import CmdRunSimulation
@@ -38,6 +39,8 @@ class BulletPhysicsWorkbench(FreeCADGui.Workbench):
             "BulletPhysics_AddEmitter",
             "Separator",
             "BulletPhysics_AddDestroyRigidBody",
+            "Separator",
+            "BulletPhysics_AddObserver",
             "Separator",
             "BulletPhysics_RunSimulation",
         ]

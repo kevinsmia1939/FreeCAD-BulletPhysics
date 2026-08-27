@@ -7,6 +7,15 @@ MM_TO_M = 0.001
 M_TO_MM = 1000.0
 _last_stop_reason = ""
 _last_compute_time_seconds = 0.0
+_playback_body_types = {}
+
+
+class SimulationFrame(dict):
+    """Recorded placements plus the rigid-body state needed for playback."""
+
+    def __init__(self, *args, passive_link_names=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.passive_link_names = tuple(passive_link_names)
 
 
 def _report_event(message):
@@ -48,7 +57,7 @@ def _find_mesh_settings(doc=None):
     return None
 
 
-def _mesh_settings_error(rigid_bodies, emitters, doc=None):
+def _mesh_settings_error(rigid_bodies, emitters, observers=(), doc=None):
     """Return a preflight error for the shared rigid-body mesh, if any."""
     settings = _find_mesh_settings(doc)
     if settings is None:
@@ -78,6 +87,7 @@ def _mesh_settings_error(rigid_bodies, emitters, doc=None):
     source_objects = [body.OriginalObject for body in rigid_bodies]
     source_objects.extend(template for emitter in emitters
                           for template, _ratio in emitter_template_entries(emitter))
+    source_objects.extend(observer.SourceObject for observer in observers)
     missing = [source.Label for source in source_objects if source.Name not in sources]
     if missing:
         return "Missing generated meshes for: " + ", ".join(missing)
@@ -179,6 +189,19 @@ def collect_destroy_bodies(doc=None):
     return result
 
 
+def collect_observers(doc=None, enabled_only=True):
+    """Return observer features with a valid volume or surface source."""
+    if doc is None:
+        doc = FreeCAD.ActiveDocument
+    return [obj for obj in doc.Objects
+            if (hasattr(obj, "Proxy")
+                and type(obj.Proxy).__name__ == "BulletObserverFeature"
+                and (not enabled_only or getattr(obj, "Enabled", True))
+                and getattr(obj, "SourceObject", None) is not None
+                and hasattr(obj.SourceObject, "Shape")
+                and obj.SourceObject.Shape is not None)]
+
+
 def _emitter_links(doc):
     links = []
     for emitter in _all_emitters(doc):
@@ -196,58 +219,27 @@ def _clear_emitter_links(doc, emitters):
     doc.recompute()
 
 
-def _emitter_max_count(emitter, simulation_duration):
-    """Return the maximum links needed for one emitter simulation run."""
-    if not getattr(emitter, "UseParticlesPerSecond", False):
-        return max(1, int(getattr(emitter, "Count", 1)))
-    start = max(0.0, getattr(emitter, "StartTime", 0.0))
-    end = max(0.0, getattr(emitter, "EndTime", 0.0))
-    if end <= 0.0:
-        end = simulation_duration
-    duration = max(0.0, end - start)
-    rate = max(0.001, getattr(emitter, "ParticlesPerSecond", 1.0))
-    return max(1, int(math.ceil(rate * duration)))
-
-
-def _make_emitter_links(doc, emitters, simulation_duration):
-    """Create hidden playback links for every scheduled emission."""
-    result = {}
-    for emitter in emitters:
-        links = []
-        entries = emitter_template_entries(emitter)
-        count = _emitter_max_count(emitter, simulation_duration)
-        for index, template in enumerate(_emitter_template_sequence(entries, count)):
-            link = doc.addObject("App::Link", f"_BtEmit_{emitter.Name}_{index + 1}")
-            link.setLink(template)
-            link.Label = f"Emission {index + 1}: {template.Label}"
-            if FreeCAD.GuiUp:
-                link.ViewObject.Visibility = False
-            links.append((link, template))
-        emitter.GeneratedLinks = [link for link, _template in links]
-        result[emitter.Name] = links
-    doc.recompute()
-    return result
-
-
-def _emitter_template_sequence(entries, count):
-    """Yield a deterministic repeating sequence matching the configured ratios."""
+def _emitter_template_selector(entries):
+    """Return a lazy, deterministic template selector for an emitter."""
     if len(entries) == 1:
-        return [entries[0][0]] * count
+        template = entries[0][0]
+        return lambda: template
 
-    # Smooth weighted round-robin spreads each template uniformly rather than
-    # emitting one ratio block at a time.  At 50% / 50% this yields A, B, A, B.
+    # Smooth weighted round-robin spreads templates uniformly without storing
+    # a sequence for every possible emission.
     weighted = [(template, int(round(max(0.0, ratio) * 1000)))
                 for template, ratio in entries]
     total_weight = sum(weight for _template, weight in weighted)
     current_weights = [0] * len(weighted)
-    sequence = []
-    for _ in range(count):
+
+    def next_template():
         for index, (_template, weight) in enumerate(weighted):
             current_weights[index] += weight
         selected = max(range(len(weighted)), key=current_weights.__getitem__)
         current_weights[selected] -= total_weight
-        sequence.append(weighted[selected][0])
-    return sequence
+        return weighted[selected][0]
+
+    return next_template
 
 
 def _sample_emission_point(shape, rng):
@@ -343,9 +335,17 @@ def apply_frame(frame, doc=None):
     emitted_links = _emitter_links(doc)
     playback_links = rigid_links + emitted_links
     playback_names = {link.Name for link in playback_links}
+    passive_link_names = set(getattr(frame, "passive_link_names", ()))
+    from ..preferences.BulletPreferences import apply_body_color
     for link in playback_links:
         if link.Name not in frame:
             link.ViewObject.Visibility = False
+            continue
+        body_type = "Passive" if link.Name in passive_link_names else "Active"
+        playback_key = (doc.Name, link.Name)
+        if _playback_body_types.get(playback_key) != body_type:
+            apply_body_color(link, body_type)
+            _playback_body_types[playback_key] = body_type
     for link_name, placement in frame.items():
         obj = doc.getObject(link_name)
         if obj is not None:
@@ -713,7 +713,8 @@ def get_last_compute_time_seconds():
     return _last_compute_time_seconds
 
 
-def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
+def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0,
+                   stop_body_type="Active"):
     """
     Run the Bullet Physics simulation using settings from the BulletWorld object.
 
@@ -724,6 +725,7 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
     global _last_stop_reason, _last_compute_time_seconds
     _last_stop_reason = ""
     _last_compute_time_seconds = 0.0
+    _playback_body_types.clear()
     compute_started_at = time.perf_counter()
     stop_delay = max(0.0, float(stop_delay))
 
@@ -747,6 +749,7 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
     rigid_bodies = collect_rigid_bodies()
     all_emitters = _all_emitters()
     emitters = collect_emitters(enabled_only=True)
+    observers = collect_observers(enabled_only=True)
     if not rigid_bodies and not emitters:
         FreeCAD.Console.PrintWarning(
             "BulletPhysics: No enabled rigid bodies or emitters found.\n"
@@ -762,18 +765,16 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
         FreeCAD.Console.PrintWarning(
             "BulletPhysics: No global Mesh object found. Use Mesh Rigid Bodies first.\n")
         return None
-    mesh_error = _mesh_settings_error(rigid_bodies, emitters)
-    if mesh_error:
-        try:
-            from ..objects.BulletMesh import generate_meshes
-            generated_count = generate_meshes(mesh_settings)
-            FreeCAD.Console.PrintMessage(
-                f"BulletPhysics: refreshed {generated_count} global mesh(es).\n")
-            mesh_error = _mesh_settings_error(rigid_bodies, emitters)
-        except Exception as exc:
-            FreeCAD.Console.PrintWarning(
-                f"BulletPhysics: could not generate global meshes ({exc}).\n")
-            return None
+    try:
+        from ..objects.BulletMesh import generate_meshes
+        generated_count = generate_meshes(mesh_settings)
+        FreeCAD.Console.PrintMessage(
+            f"BulletPhysics: regenerated {generated_count} global mesh(es).\n")
+    except Exception as exc:
+        FreeCAD.Console.PrintWarning(
+            f"BulletPhysics: could not generate global meshes ({exc}).\n")
+        return None
+    mesh_error = _mesh_settings_error(rigid_bodies, emitters, observers)
     if mesh_error:
         FreeCAD.Console.PrintWarning(f"BulletPhysics: {mesh_error}\n")
         return None
@@ -857,17 +858,25 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                       if ln.TargetBody is not None}
 
     _clear_emitter_links(FreeCAD.ActiveDocument, all_emitters)
-    emitter_links = _make_emitter_links(
-        FreeCAD.ActiveDocument, emitters, end_time)
+    generated_emitter_links = {emitter.Name: [] for emitter in emitters}
 
     # {bullet_id: (body_config_obj, link_obj, local_offset_mm, is_emitted)}
     body_map = {}
+    # Emitted active bodies scheduled to become static at a simulation time.
+    passivate_at = {}
+    passivated_body_ids = set()
     # {bullet_id: (fire_step, vel_x, vel_y, vel_z, actual_mass)}
     launch_map = {}
     # {bullet_id: DestroyRigidBodyFeature}
     destroy_trigger_ids = {}
+    # {bullet_id: BulletObserverFeature}; observers never collide physically.
+    observer_ids = {}
+    observer_body_states = {}
+    observer_match_started_at = {}
     # {bullet_id: (BulletEmitterFeature, "Start" | "Stop")}
     emitter_condition_trigger_ids = {}
+    # [(observer_bullet_id, emitter, "Start" | "Stop", required_body_type)]
+    emitter_observer_conditions = []
     stop_trigger_id = None
     stop_contact_started_at = None
     stop_contact_body = ""
@@ -895,10 +904,49 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
         )
         destroy_trigger_ids[trigger_id] = trigger
 
+    for observer in observers:
+        source = observer.SourceObject
+        shape = source.Shape
+        source_pl = source.Placement
+        bb = shape.BoundBox
+        world_center = FreeCAD.Vector(bb.Center.x, bb.Center.y, bb.Center.z)
+        half = [value * MM_TO_M
+                for value in _local_half_extents(shape, source_pl)]
+        collision_shape, _ = _make_collision_shape(
+            p, shape, half, source_pl, world_center, client,
+            is_static=True, mesh_resolution=mesh_resolution,
+            collision_margin=collision_margin,
+            source_mesh=_generated_mesh_for_source(mesh_settings, source))
+        observer_id = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=collision_shape,
+            basePosition=[world_center.x * MM_TO_M,
+                          world_center.y * MM_TO_M,
+                          world_center.z * MM_TO_M],
+            baseOrientation=source_pl.Rotation.Q,
+            physicsClientId=client,
+        )
+        # This body exists only for geometric queries. It must not create a
+        # contact response or otherwise influence the simulation.
+        p.setCollisionFilterGroupMask(
+            observer_id, -1, 0, 0, physicsClientId=client)
+        observer_ids[observer_id] = observer
+        observer_body_states[observer_id] = {}
+        observer_match_started_at[observer_id] = {}
+        observer.CurrentBodies = []
+        observer.LastEvent = ""
+        observer.Triggered = False
+        observer.TriggerBody = ""
+        observer.TriggerTime = 0.0
+
     def emitter_condition_type(emitter, name, source):
         """Return the selected condition mode, including pre-mode documents."""
         default = "Collision Object" if source is not None else "Time"
         return getattr(emitter, f"{name}ConditionType", default)
+
+    def condition_body_type(obj, name):
+        property_prefix = "Stop" if name == "End" else name
+        return getattr(obj, f"{property_prefix}ConditionBodyType", "Active")
 
     for emitter in emitters:
         for condition_type, source in (
@@ -927,9 +975,25 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                 baseOrientation=source_pl.Rotation.Q,
                 physicsClientId=client,
             )
-            emitter_condition_trigger_ids[trigger_id] = (emitter, condition_type)
+            emitter_condition_trigger_ids[trigger_id] = (
+                emitter, condition_type, condition_body_type(emitter, condition_type))
 
-    if (stop_on_contact is not None
+        for condition_type, observer in (
+                ("Start", getattr(emitter, "StartConditionObserver", None)),
+                ("End", getattr(emitter, "StopConditionObserver", None))):
+            if emitter_condition_type(emitter, condition_type, observer) != "Observer":
+                continue
+            for observer_id, configured_observer in observer_ids.items():
+                if configured_observer == observer:
+                    emitter_observer_conditions.append(
+                        (observer_id, emitter, condition_type,
+                         condition_body_type(emitter, condition_type)))
+                    break
+
+    stop_observer = (stop_on_contact if hasattr(stop_on_contact, "Proxy")
+                     and type(stop_on_contact.Proxy).__name__ == "BulletObserverFeature"
+                     else None)
+    if (stop_on_contact is not None and stop_observer is None
             and hasattr(stop_on_contact, "Shape")
             and stop_on_contact.Shape is not None):
         shape = stop_on_contact.Shape
@@ -987,12 +1051,12 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
             )
         emitter_configs[emitter.Name] = configs
 
-    emission_schedule = {}
+    emitter_schedules = {}
     started_emitters = set()
     stopped_emitters = set()
 
     def schedule_emitter(emitter, base_step):
-        """Schedule an emitter's time window relative to *base_step*."""
+        """Store an emitter's schedule without allocating future particles."""
         start = max(0.0, getattr(emitter, "StartTime", 0.0))
         end = max(0.0, getattr(emitter, "EndTime", 0.0))
         start_step = base_step + max(0, int(round(start / time_step)))
@@ -1012,15 +1076,42 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
             count = max(1, int(math.ceil(rate * duration)))
         else:
             count = max(1, int(getattr(emitter, "Count", 1)))
-        for index in range(count):
-            if getattr(emitter, "UseParticlesPerSecond", False):
-                step = start_step + int(round(index / (rate * time_step)))
-            else:
-                step = (start_step if count == 1 else start_step +
-                        (end_step - start_step) * index // (count - 1))
-            if step > end_step:
-                break
-            emission_schedule.setdefault(step, []).append((emitter, index))
+        emitter_schedules[emitter.Name] = {
+            "emitter": emitter,
+            "start_step": start_step,
+            "end_step": end_step,
+            "count": count,
+            "next_index": 0,
+            "rate": rate if getattr(emitter, "UseParticlesPerSecond", False) else None,
+            "next_template": _emitter_template_selector(
+                emitter_template_entries(emitter)),
+        }
+
+    def scheduled_emission_step(schedule, index):
+        if schedule["rate"] is not None:
+            return (schedule["start_step"]
+                    + int(round(index / (schedule["rate"] * time_step))))
+        if schedule["count"] == 1:
+            return schedule["start_step"]
+        return (schedule["start_step"]
+                + (schedule["end_step"] - schedule["start_step"])
+                * index // (schedule["count"] - 1))
+
+    def emit_scheduled_particles(step):
+        """Materialize only the particles whose emission step has arrived."""
+        for schedule in emitter_schedules.values():
+            emitter = schedule["emitter"]
+            if emitter.Name in stopped_emitters:
+                continue
+            while schedule["next_index"] < schedule["count"]:
+                index = schedule["next_index"]
+                scheduled_step = scheduled_emission_step(schedule, index)
+                if scheduled_step > schedule["end_step"] or scheduled_step > step:
+                    break
+                spawn_emission(
+                    emitter, index, schedule["next_template"](),
+                    step * time_step)
+                schedule["next_index"] += 1
 
     for emitter in emitters:
         start_source = getattr(emitter, "StartConditionObject", None)
@@ -1028,11 +1119,20 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
             schedule_emitter(emitter, 0)
             started_emitters.add(emitter.Name)
 
-    def spawn_emission(emitter, index):
+    def spawn_emission(emitter, index, template, emission_time):
         rng, direction_rng = emitter_rngs[emitter.Name]
-        link, template = emitter_links[emitter.Name][index]
         (col, characteristic_radius, mass, local_offset,
          restitution, friction) = emitter_configs[emitter.Name][template.Name]
+        link = FreeCAD.ActiveDocument.addObject(
+            "App::Link", f"_BtEmit_{emitter.Name}_{index + 1}")
+        link.setLink(template)
+        link.Label = f"Emission {index + 1}: {template.Label}"
+        from ..preferences.BulletPreferences import apply_body_color
+        apply_body_color(link, emitter.BodyType)
+        if FreeCAD.GuiUp:
+            link.ViewObject.Visibility = False
+        generated_emitter_links[emitter.Name].append(link)
+        emitter.GeneratedLinks = generated_emitter_links[emitter.Name]
         center = _sample_emission_point(emitter.EmissionSource.Shape, rng)
         rotation = _emitter_rotation(emitter, rng)
         body_id = p.createMultiBody(
@@ -1074,8 +1174,162 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
         if FreeCAD.GuiUp:
             link.ViewObject.Visibility = True
         body_map[body_id] = (emitter, link, local_offset, True)
+        become_passive_after = max(
+            0.0, getattr(emitter, "BecomePassiveAfter", 0.0))
+        if mass > 0.0 and become_passive_after > 0.0:
+            passivate_at[body_id] = emission_time + become_passive_after
         _report_event(
             f"particle '{link.Label}' emitted by '{emitter.Label}'.")
+
+    def body_is_active(body_id, entry):
+        """Return whether a body currently participates as an active body."""
+        return (entry is not None
+                and entry[0].BodyType == "Active"
+                and body_id not in passivated_body_ids)
+
+    def body_matches_type(body_id, entry, required_type):
+        if entry is None:
+            return False
+        if required_type == "Any":
+            return True
+        current_type = "Active" if body_is_active(body_id, entry) else "Passive"
+        return current_type == required_type
+
+    def observer_body_details(body_id, entry):
+        """Return the user-facing type and linear speed for one Bullet body."""
+        linear, _angular = p.getBaseVelocity(body_id, physicsClientId=client)
+        speed = sum(value * value for value in linear) ** 0.5
+        body_type = "Active" if body_is_active(body_id, entry) else "Passive"
+        return body_type, speed
+
+    def observer_condition_matches(observer, body_type, speed):
+        """Evaluate the observer-owned body-type and speed rules."""
+        required_type = getattr(observer, "BodyTypeCondition", "Any")
+        speed_mode = getattr(observer, "SpeedCondition", "Any")
+        type_enabled = required_type != "Any"
+        speed_enabled = speed_mode != "Any"
+        type_match = body_type == required_type
+        threshold = max(0.0, getattr(observer, "Speed", 0.0))
+        speed_match = (speed >= threshold if speed_mode == "At least"
+                       else speed <= threshold)
+        enabled_matches = []
+        if type_enabled:
+            enabled_matches.append(type_match)
+        if speed_enabled:
+            enabled_matches.append(speed_match)
+        if not enabled_matches:
+            return True
+        if getattr(observer, "ConditionLogic", "AND") == "OR":
+            return any(enabled_matches)
+        return all(enabled_matches)
+
+    def body_touches_observer(observer_id, observer, body_id):
+        """Check both volume containment and shape contact without response."""
+        position, _orientation = p.getBasePositionAndOrientation(
+            body_id, physicsClientId=client)
+        point = FreeCAD.Vector(
+            position[0] * M_TO_MM,
+            position[1] * M_TO_MM,
+            position[2] * M_TO_MM)
+        try:
+            if observer.SourceObject.Shape.isInside(point, 1e-7, True):
+                return True
+        except Exception:
+            pass
+        try:
+            return bool(p.getClosestPoints(
+                bodyA=observer_id, bodyB=body_id, distance=0.0,
+                physicsClientId=client))
+        except Exception:
+            return False
+
+    def update_observers(frame_number, current_time):
+        """Report rigid bodies entering, leaving, or changing type in observers."""
+        for observer_id, observer in observer_ids.items():
+            previous = observer_body_states[observer_id]
+            current = {}
+            details = []
+            matching = {}
+            for body_id, entry in body_map.items():
+                if not body_touches_observer(observer_id, observer, body_id):
+                    continue
+                body_type, speed = observer_body_details(body_id, entry)
+                current[body_id] = body_type
+                if observer_condition_matches(observer, body_type, speed):
+                    matching[body_id] = (entry, body_type, speed)
+                details.append("{}: {} ({:.6g} m/s)".format(
+                    entry[1].Label, body_type, speed))
+                if body_id not in previous:
+                    message = ("observer '{}' frame {} (t={:.6f} s): '{}' entered "
+                               "as {} at {:.6g} m/s".format(
+                                   observer.Label, frame_number, current_time,
+                                   entry[1].Label, body_type, speed))
+                    observer.LastEvent = message
+                    FreeCAD.Console.PrintMessage("BulletPhysics: {}\n".format(message))
+                elif previous[body_id] != body_type:
+                    message = ("observer '{}' frame {} (t={:.6f} s): '{}' changed "
+                               "from {} to {} at {:.6g} m/s".format(
+                                   observer.Label, frame_number, current_time,
+                                   entry[1].Label, previous[body_id], body_type, speed))
+                    observer.LastEvent = message
+                    FreeCAD.Console.PrintMessage("BulletPhysics: {}\n".format(message))
+            for body_id, old_type in previous.items():
+                if body_id in current:
+                    continue
+                entry = body_map.get(body_id)
+                label = entry[1].Label if entry is not None else "removed body"
+                message = ("observer '{}' frame {} (t={:.6f} s): '{}' left "
+                           "as {}".format(
+                               observer.Label, frame_number, current_time,
+                               label, old_type))
+                observer.LastEvent = message
+                FreeCAD.Console.PrintMessage("BulletPhysics: {}\n".format(message))
+            if current != previous:
+                observer.CurrentBodies = sorted(details)
+            observer_body_states[observer_id] = current
+            started_at = observer_match_started_at[observer_id]
+            for body_id in list(started_at):
+                if body_id not in matching:
+                    del started_at[body_id]
+            for body_id, (entry, body_type, speed) in matching.items():
+                started_at.setdefault(body_id, current_time)
+                if (not observer.Triggered
+                        and current_time - started_at[body_id]
+                        >= max(0.0, getattr(observer, "TriggerDelay", 0.0))):
+                    observer.Triggered = True
+                    observer.TriggerBody = entry[1].Label
+                    observer.TriggerTime = current_time
+                    message = ("observer '{}' triggered at frame {} (t={:.6f} s): "
+                               "'{}' matched as {} at {:.6g} m/s".format(
+                                   observer.Label, frame_number, current_time,
+                                   entry[1].Label, body_type, speed))
+                    observer.LastEvent = message
+                    FreeCAD.Console.PrintMessage("BulletPhysics: {}\n".format(message))
+
+    def matching_observer_body(observer_id, _required_type=None):
+        """Return the latched observer signal body, if the observer triggered."""
+        observer = observer_ids[observer_id]
+        return observer.TriggerBody if observer.Triggered else ""
+
+    def passivate_emitted_bodies(current_time, frame_number):
+        """Freeze emitted active bodies whose configured lifetime has elapsed."""
+        for body_id, passive_time in list(passivate_at.items()):
+            if current_time < passive_time:
+                continue
+            entry = body_map.get(body_id)
+            del passivate_at[body_id]
+            if entry is None:
+                continue
+            p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=client)
+            p.resetBaseVelocity(
+                body_id, linearVelocity=[0.0, 0.0, 0.0],
+                angularVelocity=[0.0, 0.0, 0.0], physicsClientId=client)
+            passivated_body_ids.add(body_id)
+            from ..preferences.BulletPreferences import apply_body_color
+            apply_body_color(entry[1], "Passive", refresh=True)
+            FreeCAD.Console.PrintMessage(
+                f"BulletPhysics: emitted particle '{entry[1].Label}' became "
+                f"passive at frame {frame_number} (t={current_time:.6f} s).\n")
 
     def destroy_contacted_bodies():
         """Remove active bodies as soon as they contact a destruction trigger."""
@@ -1085,13 +1339,15 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
             for contact in contacts:
                 body_id = contact[2]
                 entry = body_map.get(body_id)
-                if entry is not None and entry[0].BodyType == "Active":
+                if body_is_active(body_id, entry):
                     destroyed[body_id] = trigger
 
         for body_id, trigger in destroyed.items():
             body_config, link, _local_offset, is_emitted = body_map.pop(body_id)
             body_label = body_config.Label
             launch_map.pop(body_id, None)
+            passivate_at.pop(body_id, None)
+            passivated_body_ids.discard(body_id)
             p.removeBody(body_id, physicsClientId=client)
 
             if is_emitted:
@@ -1109,37 +1365,67 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                 f"destroy trigger '{trigger.Label}'.")
 
     def conditional_stop_contact():
-        """Return the active body label that touched the stop target, if any."""
+        """Return the body label satisfying the configured stop condition."""
+        if stop_observer is not None:
+            for observer_id, observer in observer_ids.items():
+                if observer == stop_observer:
+                    return matching_observer_body(observer_id, stop_body_type)
         if stop_trigger_id is None:
             return ""
         contacts = p.getContactPoints(bodyA=stop_trigger_id, physicsClientId=client)
         for contact in contacts:
             entry = body_map.get(contact[2])
-            if entry is not None and entry[0].BodyType == "Active":
+            if body_matches_type(contact[2], entry, stop_body_type):
                 return entry[0].Label
         return ""
 
-    def update_emitter_conditions(next_step):
+    def update_emitter_conditions(next_step, event_time):
         """Start or stop emitters whose configured trigger was just touched."""
-        for trigger_id, (emitter, condition_type) in emitter_condition_trigger_ids.items():
+        for trigger_id, (emitter, condition_type, required_type) in emitter_condition_trigger_ids.items():
             contacts = p.getContactPoints(bodyA=trigger_id, physicsClientId=client)
             touched = any(
-                entry is not None and entry[0].BodyType == "Active"
-                for entry in (body_map.get(contact[2]) for contact in contacts))
+                body_matches_type(contact[2], body_map.get(contact[2]), required_type)
+                for contact in contacts)
             if not touched:
                 continue
             if condition_type == "Start" and emitter.Name not in started_emitters:
                 if emitter.Name not in stopped_emitters:
                     schedule_emitter(emitter, next_step)
-                    _report_event(
-                        f"emitter '{emitter.Label}' started by "
-                        f"'{emitter.StartConditionObject.Label}'.")
+                    FreeCAD.Console.PrintMessage(
+                        f"BulletPhysics: emitter '{emitter.Label}' start "
+                        f"condition triggered at frame {next_step} "
+                        f"(t={event_time:.6f} s) by target "
+                        f"'{emitter.StartConditionObject.Label}'.\n")
                 started_emitters.add(emitter.Name)
             elif condition_type == "End" and emitter.Name not in stopped_emitters:
                 stopped_emitters.add(emitter.Name)
-                _report_event(
-                    f"emitter '{emitter.Label}' stopped by "
-                    f"'{emitter.StopConditionObject.Label}'.")
+                FreeCAD.Console.PrintMessage(
+                    f"BulletPhysics: emitter '{emitter.Label}' stop "
+                    f"condition triggered at frame {next_step} "
+                    f"(t={event_time:.6f} s) by target "
+                    f"'{emitter.StopConditionObject.Label}'.\n")
+
+        for observer_id, emitter, condition_type, required_type in emitter_observer_conditions:
+            body_label = matching_observer_body(observer_id, required_type)
+            if not body_label:
+                continue
+            observer = observer_ids[observer_id]
+            if condition_type == "Start" and emitter.Name not in started_emitters:
+                if emitter.Name not in stopped_emitters:
+                    schedule_emitter(emitter, next_step)
+                    FreeCAD.Console.PrintMessage(
+                        f"BulletPhysics: emitter '{emitter.Label}' start observer "
+                        f"condition triggered at frame {next_step} "
+                        f"(t={event_time:.6f} s): '{body_label}' is "
+                        f"{required_type.lower()} in '{observer.Label}'.\n")
+                started_emitters.add(emitter.Name)
+            elif condition_type == "End" and emitter.Name not in stopped_emitters:
+                stopped_emitters.add(emitter.Name)
+                FreeCAD.Console.PrintMessage(
+                    f"BulletPhysics: emitter '{emitter.Label}' stop observer "
+                    f"condition triggered at frame {next_step} "
+                    f"(t={event_time:.6f} s): '{body_label}' is "
+                    f"{required_type.lower()} in '{observer.Label}'.\n")
 
     try:
         for rb in rigid_bodies:
@@ -1154,6 +1440,8 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
 
             # Reset the link to the original position before building the world
             link.Placement = orig_pl.copy()
+            from ..preferences.BulletPreferences import apply_body_color
+            apply_body_color(link, rb.BodyType)
 
             shape = original.Shape
             bb = shape.BoundBox
@@ -1246,11 +1534,10 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
 
             body_map[body_id] = (rb, link, local_offset, False)
 
-        for emitter, index in emission_schedule.get(0, []):
-            spawn_emission(emitter, index)
+        emit_scheduled_particles(0)
 
         # Frame 0 — initial placements of all Links (before any stepping)
-        initial_frame = {}
+        initial_frame = SimulationFrame()
         initial_speeds = {}
         for body_id, (rb, link, _, _) in body_map.items():
             initial_frame[link.Name] = link.Placement.copy()
@@ -1260,6 +1547,9 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                 initial_speeds[link.Name] = sum(value * value for value in linear) ** 0.5
             else:
                 initial_speeds[link.Name] = 0.0
+        initial_frame.passive_link_names = tuple(
+            link.Name for body_id, (_rb, link, _offset, _emitted) in body_map.items()
+            if not body_is_active(body_id, body_map.get(body_id)))
         frames = [initial_frame]
         speed_frames = [initial_speeds]
 
@@ -1272,16 +1562,17 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                    for body_id, (fire_step, *_values) in launch_map.items()):
                 return True
             return any(
-                scheduled_step > current_step
-                and emitter.Name not in stopped_emitters
-                for scheduled_step, emissions in emission_schedule.items()
-                for emitter, _index in emissions)
+                schedule["emitter"].Name not in stopped_emitters
+                and schedule["next_index"] < schedule["count"]
+                and scheduled_emission_step(schedule, schedule["next_index"])
+                > current_step
+                for schedule in emitter_schedules.values())
 
         def active_bodies_settled(current_step):
             if has_future_simulation_events(current_step):
                 return False
             for body_id, (body_config, _link, _offset, _emitted) in body_map.items():
-                if body_config.BodyType != "Active":
+                if not body_is_active(body_id, body_map.get(body_id)):
                     continue
                 linear, angular = p.getBaseVelocity(
                     body_id, physicsClientId=client)
@@ -1295,9 +1586,7 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
         for step in range(steps):
             conditional_stop_reason = ""
             if step > 0:
-                for emitter, index in emission_schedule.get(step, []):
-                    if emitter.Name not in stopped_emitters:
-                        spawn_emission(emitter, index)
+                emit_scheduled_particles(step)
 
             # Fire any launchers whose time has come (before stepping this frame)
             for body_id, (fire_step, vx, vy, vz, actual_mass, char_r) in launch_map.items():
@@ -1323,16 +1612,18 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                 p.stepSimulation(physicsClientId=client)
                 current_time = (step * time_step
                                 + (sub_step + 1) * bullet_tick)
+                passivate_emitted_bodies(current_time, step + 1)
+                update_observers(step + 1, current_time)
                 if stop_contact_started_at is None:
                     contacted_body = conditional_stop_contact()
                     if contacted_body:
                         stop_contact_started_at = current_time
                         stop_contact_body = contacted_body
-                        if stop_delay > 0.0:
-                            FreeCAD.Console.PrintMessage(
-                                f"BulletPhysics: '{contacted_body}' touched "
-                                f"'{stop_on_contact.Label}'; stopping in "
-                                f"{stop_delay:.3f} s.\n")
+                        FreeCAD.Console.PrintMessage(
+                            f"BulletPhysics: conditional stop triggered at "
+                            f"frame {step + 1} (t={current_time:.6f} s): "
+                            f"'{contacted_body}' touched target "
+                            f"'{stop_on_contact.Label}'; delay={stop_delay:.3f} s.\n")
                 if (stop_contact_started_at is not None
                         and current_time - stop_contact_started_at >= stop_delay):
                     conditional_stop_reason = stop_contact_body
@@ -1340,10 +1631,10 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                 # Evaluate emission triggers before destruction removes the
                 # contacting Bullet body. This lets a shared target both stop
                 # an emitter and destroy the incoming active body.
-                update_emitter_conditions(step + 1)
+                update_emitter_conditions(step + 1, current_time)
                 destroy_contacted_bodies()
 
-            frame = {}
+            frame = SimulationFrame()
             speed_frame = {}
             for body_id, (rb, link, local_offset, is_emitted) in body_map.items():
                 if rb.BodyType == "Passive":
@@ -1364,6 +1655,9 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                 new_base = new_world_center - new_rot.multVec(local_offset)
                 frame[link.Name] = FreeCAD.Placement(new_base, new_rot)
                 speed_frame[link.Name] = sum(value * value for value in linear) ** 0.5
+            frame.passive_link_names = tuple(
+                link.Name for body_id, (_rb, link, _offset, _emitted) in body_map.items()
+                if not body_is_active(body_id, body_map.get(body_id)))
 
             frames.append(frame)
             speed_frames.append(speed_frame)
@@ -1379,7 +1673,8 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                         f"'{conditional_stop_reason}' touched "
                         f"'{stop_on_contact.Label}'")
                 FreeCAD.Console.PrintMessage(
-                    f"BulletPhysics: simulation stopped because {_last_stop_reason}.\n")
+                    f"BulletPhysics: simulation stopped at frame {step + 1} "
+                    f"(t={current_time:.6f} s) because {_last_stop_reason}.\n")
                 break
 
             if stop_when_settled:
@@ -1403,6 +1698,11 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0):
                     break
 
         return frames, time_step, speed_frames
+
+    except KeyboardInterrupt:
+        FreeCAD.Console.PrintMessage(
+            "BulletPhysics: simulation interrupted; disconnecting Bullet.\n")
+        raise
 
     finally:
         p.disconnect(client)
@@ -1442,6 +1742,9 @@ def save_simulation_cache(frames, time_per_frame, speed_frames=None, doc=None):
              for name, pl in frame.items()}
             for frame in frames
         ],
+        "passive_links": [
+            list(getattr(frame, "passive_link_names", ())) for frame in frames
+        ],
         "speeds": speed_frames or [],
     }
     with open(path, "w") as f:
@@ -1461,8 +1764,11 @@ def load_simulation_cache(doc=None):
             data = json.load(f)
         time_per_frame = float(data["time_per_frame"])
         frames = []
-        for fd in data["frames"]:
-            frame = {}
+        passive_link_frames = data.get("passive_links", [])
+        for index, fd in enumerate(data["frames"]):
+            frame = SimulationFrame(
+                passive_link_names=(passive_link_frames[index]
+                                    if index < len(passive_link_frames) else ()))
             for name, pd in fd.items():
                 b = pd["base"]
                 r = pd["rotation"]
