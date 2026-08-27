@@ -26,6 +26,10 @@ class BulletWorldFeature:
                         "Bullet constraint-solver iterations per step")
         obj.SolverIterations = 10
 
+        obj.addProperty("App::PropertyBool", "EnableCPUParallel", "Simulation",
+                        "Request all available CPU solver threads when supported by the installed PyBullet build")
+        obj.EnableCPUParallel = True
+
         obj.addProperty("App::PropertyInteger", "SubSteps", "Simulation",
                         "Physics sub-steps per recorded frame. "
                         "Higher values prevent objects passing through each other "
@@ -109,6 +113,10 @@ class BulletWorldFeature:
                             "Higher values prevent objects passing through each other "
                             "at the cost of simulation time (default 4)")
             obj.SubSteps = 4
+        if not hasattr(obj, "EnableCPUParallel"):
+            obj.addProperty("App::PropertyBool", "EnableCPUParallel", "Simulation",
+                            "Request all available CPU solver threads when supported by the installed PyBullet build")
+            obj.EnableCPUParallel = True
         if not hasattr(obj, "LinearDamping"):
             obj.addProperty("App::PropertyFloat", "LinearDamping", "Physics",
                             "Air damping applied to linear (translational) velocity of active "

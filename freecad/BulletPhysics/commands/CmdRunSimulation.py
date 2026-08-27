@@ -77,6 +77,12 @@ class SimulationPanel:
         self.sim_status = QtWidgets.QLabel("Ready.")
         sim_layout.addWidget(self.sim_status)
 
+        self.cpu_parallel_chk = QtWidgets.QCheckBox("Enable CPU parallelization")
+        self.cpu_parallel_chk.setToolTip(
+            "Use all available CPU solver threads when the installed PyBullet "
+            "build supports parallel solving. Enabled by default.")
+        sim_layout.addWidget(self.cpu_parallel_chk)
+
         stop_group = QtWidgets.QGroupBox("Conditional Stop")
         stop_layout = QtWidgets.QVBoxLayout(stop_group)
         self.stop_on_contact_check = QtWidgets.QCheckBox(
@@ -257,6 +263,7 @@ class SimulationPanel:
         self.speed_combo.currentIndexChanged.connect(self._save_panel_settings)
         self.loop_chk.toggled.connect(self._save_panel_settings)
         self.speed_graph_axis.currentIndexChanged.connect(self._save_panel_settings)
+        self.cpu_parallel_chk.toggled.connect(self._save_panel_settings)
         self._load_stop_condition()
         self._update_stop_target_state()
 
@@ -348,6 +355,8 @@ class SimulationPanel:
         self._loading_panel_settings = True
         self.collision_chk.setChecked(
             getattr(world, "ShowCollisionWireframes", False))
+        self.cpu_parallel_chk.setChecked(
+            getattr(world, "EnableCPUParallel", True))
         speed = getattr(world, "PlaybackSpeed", "1×")
         speed_index = self.speed_combo.findText(speed)
         if speed_index >= 0:
@@ -366,6 +375,7 @@ class SimulationPanel:
         if world is None:
             return
         world.ShowCollisionWireframes = self.collision_chk.isChecked()
+        world.EnableCPUParallel = self.cpu_parallel_chk.isChecked()
         world.PlaybackSpeed = self.speed_combo.currentText()
         world.PlaybackLoop = self.loop_chk.isChecked()
         world.SpeedGraphAxis = self.speed_graph_axis.currentText()
@@ -431,7 +441,8 @@ class SimulationPanel:
             callback=cb,
             stop_on_contact=self._stop_target(),
             stop_delay=self._stop_delay(),
-            stop_body_type=self.stop_body_type_combo.currentText())
+            stop_body_type=self.stop_body_type_combo.currentText(),
+            cpu_parallel=self.cpu_parallel_chk.isChecked())
         self.sim_btn.setEnabled(True)
         self.stop_sim_btn.setEnabled(False)
         self.pause_sim_btn.setEnabled(False)

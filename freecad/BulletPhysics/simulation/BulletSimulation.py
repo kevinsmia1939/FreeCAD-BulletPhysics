@@ -714,7 +714,7 @@ def get_last_compute_time_seconds():
 
 
 def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0,
-                   stop_body_type="Active"):
+                   stop_body_type="Active", cpu_parallel=None):
     """
     Run the Bullet Physics simulation using settings from the BulletWorld object.
 
@@ -846,11 +846,30 @@ def run_simulation(callback=None, stop_on_contact=None, stop_delay=0.0,
         f"linearDamping={linear_damping:.3f}, angularDamping={angular_damping:.3f}\n"
     )
 
+    if cpu_parallel is None:
+        cpu_parallel = getattr(world, "EnableCPUParallel", True)
+
     client = p.connect(p.DIRECT)
     p.setGravity(gx, gy, gz, physicsClientId=client)
     p.setTimeStep(bullet_tick, physicsClientId=client)
     p.setPhysicsEngineParameter(
         numSolverIterations=solver_iters, physicsClientId=client)
+    if cpu_parallel:
+        # ``numSolverThreads`` is an optional extension: upstream PyBullet's
+        # standard DIRECT binding does not expose it, but builds linked with a
+        # parallel Bullet solver may.  Do not fail a simulation when the
+        # user's PyBullet package only includes the sequential solver.
+        try:
+            import os
+            cpu_threads = max(1, os.cpu_count() or 1)
+            p.setPhysicsEngineParameter(
+                numSolverThreads=cpu_threads, physicsClientId=client)
+            FreeCAD.Console.PrintMessage(
+                f"BulletPhysics: CPU parallel solver enabled ({cpu_threads} threads).\n")
+        except (TypeError, ValueError):
+            FreeCAD.Console.PrintWarning(
+                "BulletPhysics: this PyBullet build does not support CPU parallel "
+                "solving; using the sequential solver.\n")
 
     launchers = collect_launchers()
     # Build a lookup: rb.Name -> launcher object  (last one wins if duplicates)
